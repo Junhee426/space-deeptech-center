@@ -121,7 +121,8 @@
           <label>PA Part<select id="s_pa"><option selected>PA-GaN-Ka-20W</option><option>PA-GaAs-Ka-10W</option><option>PA-GaN-Ka-50W</option></select></label>
           <label>LNA Part<select id="s_lna"><option selected>LNA-GaAs-Ka</option><option>LNA-SiGe-Ka</option></select></label>
 
-          <div class="group-title">LINK / PLATFORM</div>
+          <details class="group-block" open>
+          <summary class="group-title">LINK / PLATFORM</summary>
           <div class="cols2">
             <label>RF W<input id="s_rf" value="20" type="number"></label>
             <label>Min El °<input id="s_el" value="20" type="number"></label>
@@ -131,12 +132,18 @@
             <label>Dish m<input id="s_dia" value=".45" step=".05" type="number"></label>
             <label>Bus W<input id="s_bus" value="1800" type="number"></label>
             <label>Payload %<input id="s_pshare" value="50" type="number"></label>
+          </div>
+          </details>
+          <details class="group-block">
+          <summary class="group-title">ADVANCED LINK BUDGET</summary>
+          <div class="cols2">
             <label>Proc TOPS<input id="s_tops" value="2" step=".1" type="number"></label>
             <label>Coding gap dB<input id="s_gap" value="2" step=".5" type="number"></label>
             <label>Atm/Rain loss dB<input id="s_atm" value="0" step=".5" type="number"></label>
             <label>Radiator K<input id="s_rtemp" value="323.15" step="5" type="number"></label>
             <label>Emissivity<input id="s_eps" value=".85" step=".05" type="number"></label>
           </div>
+          </details>
         </div>
 
         <div class="lab-content">
@@ -176,8 +183,10 @@
       <div class="lab-title"><div><span>LAB 02</span><h2>Digital Beamforming Chip Lab</h2><p>배열 규모와 빔 수가 ADC/DAC·연산량·전력·실제 운용 가능한 빔 수를 어떻게 제한하는지 분석</p></div><button class="run-lab" id="b_run">RUN & PROPAGATE</button></div>
       <div class="lab-layout">
         <div class="panel form-card">
+          <div class="group-title">ARCHITECTURE</div>
           <label>Architecture<select id="b_arch"><option>Analog</option><option>Hybrid</option><option selected>Fully Digital</option></select></label>
           <label>Processor<select id="b_proc"><option selected>FPGA</option><option>ASIC</option></select></label>
+          <div class="group-title">COMPUTE / ARRAY</div>
           <div class="cols2">
             <label>Sample GS/s<input id="b_gsps" value="1" step=".1" type="number"></label>
             <label>ADC bits<input id="b_bits" value="12" type="number"></label>
@@ -280,12 +289,17 @@
           <label>Mitigation<select id="r_mit"><option>None</option><option>ECC</option><option>TMR</option><option selected>TMR+Scrub</option></select></label>
           <div class="cols2">
             <label>Mission yr<input id="r_year" value="5" type="number"></label><label>Al mm<input id="r_shield" value="2" step=".5" type="number"></label>
+          </div>
+          <details class="group-block">
+          <summary class="group-title">DOSE RATES &amp; FLEET DETAIL</summary>
+          <div class="cols2">
             <label>TID krad/yr<input id="r_tid" value="2" step=".5" type="number"></label><label>TID tol<input id="r_tidt" value="30" type="number"></label>
             <label>DD arb/yr<input id="r_dd" value="1" step=".2" type="number"></label><label>DD tol<input id="r_ddt" value="10" type="number"></label>
             <label>SEU/dev/day<input id="r_seu" value=".002" step=".001" type="number"></label><label>SEL/dev/day<input id="r_sel" value=".00002" step=".00001" type="number"></label>
             <label>Devices<input id="r_dev" value="25" type="number"></label><label>Scrub min<input id="r_scrub" value="10" type="number"></label>
             <label>Spares<input id="r_spares" value="1" type="number"></label><label>Fleet nodes<input id="r_nodes" value="128" type="number"></label>
           </div>
+          </details>
         </div>
         <div class="lab-content">
           <div class="metrics six"><div><span>Mission TID</span><b id="r_mtid">—</b></div><div><span>TID Use</span><b id="r_use">—</b></div><div><span>SEU/day</span><b id="r_sday">—</b></div><div><span>Mission SEL</span><b id="r_msel">—</b></div><div><span>Availability</span><b id="r_av">—</b></div><div><span>Risk</span><b id="r_risk">—</b></div></div>
@@ -312,10 +326,12 @@
           <label>Allowed radiation risk<select id="o_risk"><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option></select></label>
           <label>Objective<select id="o_obj"><option selected>Balanced</option><option>Lowest Cost</option><option>Highest Capacity</option><option>Lowest Mass</option></select></label>
 
-          <div class="group-title">SENSITIVITY</div>
+          <details class="group-block">
+          <summary class="group-title">SENSITIVITY</summary>
           <label>Parameter<select id="sen_param"><option>rf_output_w</option><option>bandwidth_mhz</option><option>beams</option><option>elements</option><option>altitude_km</option><option>shielding_mm_al</option></select></label>
           <div class="cols2"><label>Low<input id="sen_low" value="10" type="number"></label><label>High<input id="sen_high" value="40" type="number"></label></div>
           <button id="sen_run">RUN SENSITIVITY</button>
+          </details>
         </div>
         <div class="lab-content">
           <div class="metrics six">
@@ -344,12 +360,17 @@
             <label>Inclination °<input id="cv_inc" value="42" type="number"></label>
             <label>Planes<input id="cv_planes" value="16" type="number"></label>
             <label>Sats / plane<input id="cv_spp" value="8" type="number"></label>
+          </div>
+          <details class="group-block">
+          <summary class="group-title">SIMULATION SETTINGS</summary>
+          <div class="cols2">
             <label>Min elevation °<input id="cv_el" value="20" type="number"></label>
             <label>Min visible<input id="cv_minvis" value="1" type="number"></label>
             <label>Walker F<input id="cv_f" value="1" type="number"></label>
             <label>Duration h<input id="cv_hours" value="24" type="number"></label>
             <label>Step sec<input id="cv_step" value="120" type="number"></label>
           </div>
+          </details>
           <button id="cv_sweep">SWEEP WALKER OPTIONS</button>
         </div>
         <div class="lab-content">
@@ -387,6 +408,13 @@
           <div class="cols2">
             <label>Runs<input id="mc_runs" value="500" type="number"></label>
             <label>Seed<input id="mc_seed" value="42" type="number"></label>
+            <label>Min Gbps<input id="mc_cap" value="2" type="number"></label>
+            <label>Max power W<input id="mc_pmax" value="1200" type="number"></label>
+            <label>Max mass kg<input id="mc_mmax" value="500" type="number"></label>
+          </div>
+          <details class="group-block">
+          <summary class="group-title">UNCERTAINTY SIGMAS</summary>
+          <div class="cols2">
             <label>RF σ %<input id="mc_rf" value="5" type="number"></label>
             <label>Loss σ dB<input id="mc_loss" value=".8" step=".1" type="number"></label>
             <label>BW σ %<input id="mc_bw" value="5" type="number"></label>
@@ -395,10 +423,8 @@
             <label>SEU σ %<input id="mc_seu" value="25" type="number"></label>
             <label>Mass σ %<input id="mc_mass" value="4" type="number"></label>
             <label>Cost σ %<input id="mc_cost" value="8" type="number"></label>
-            <label>Min Gbps<input id="mc_cap" value="2" type="number"></label>
-            <label>Max power W<input id="mc_pmax" value="1200" type="number"></label>
-            <label>Max mass kg<input id="mc_mmax" value="500" type="number"></label>
           </div>
+          </details>
         </div>
         <div class="lab-content">
           <div class="metrics six">
