@@ -11,6 +11,12 @@ const layout={
 };
 const cfg={displayModeBar:false,responsive:true};
 let lastIntegrated=null;
+// Plotly can throw synchronously when drawing into a hidden (zero-width) tab,
+// e.g. while another lab's charts are refreshed by SYNC ALL LABS. Swallow that
+// so one hidden chart never aborts the rest of a render/propagate pass.
+function reactChart(id,traces,layoutObj,cfgObj){
+ try{ Plotly.react(id,traces,layoutObj,cfgObj) }catch(e){ console.warn("Chart render skipped for #"+id,e) }
+}
 
 async function post(url,obj){
  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
@@ -22,6 +28,14 @@ function show(v){
  document.querySelectorAll(".view").forEach(x=>x.classList.remove("active")); $(v).classList.add("active");
  document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
  window.scrollTo({top:0,behavior:"smooth"});
+ // Charts drawn while a tab was hidden are skipped (see reactChart); redraw them now that it's visible.
+ if(lastIntegrated){
+  if(v==="satcom") renderSat(lastIntegrated.satcom);
+  else if(v==="beam") renderBeam(lastIntegrated.beamforming);
+  else if(v==="payload") renderPayload(lastIntegrated.payload);
+  else if(v==="rad") renderRad(lastIntegrated.radiation);
+  else if(v==="center") renderCenter(lastIntegrated);
+ }
 }
 document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>show(b.dataset.view));
 
@@ -80,18 +94,18 @@ function renderPayload(d){
  $("p_comp").textContent=d.rf.hpa_effective_compression_db+" dB"; $("p_lin").textContent=d.rf.hpa_linearity_score+" /100";
  $("p_avgrf").textContent=d.rf.average_rf_w+" W"; $("p_bins").textContent=d.digital.channelizer_bins_proxy;
  $("p_bhgain").textContent=d.resource.normalized_resource_gain+"×"; $("p_feeder").textContent=(d.resource.feeder_load_fraction*100).toFixed(0)+" %";
- Plotly.react("p_chain",[{type:"scatter",mode:"lines+markers",x:d.chain.map(x=>x.stage),y:d.chain.map(x=>x.level_dbw)}],{...layout,title:"RF Signal Level [dBW]"},cfg);
- Plotly.react("p_archchart",[{type:"bar",x:["Flexibility","Complexity"],y:[d.system.flexibility_score,d.system.complexity_score]}],{...layout,title:payloadObj().architecture,yaxis:{range:[0,100]}},cfg);
- Plotly.react("p_powerstack",[{type:"bar",x:["PA DC","Regen","Converters","Channelizer","Routing"],y:[d.power.pa_dc_w,d.digital.regenerative_power_w,d.digital.converter_power_w,d.digital.channelizer_power_w,d.digital.routing_power_w]}],{...layout,title:"Payload Power Stack [W]"},cfg);
- Plotly.react("p_flex",[{type:"bar",x:["Resource gain","Interference eff.","Demand match","Coverage duty"],y:[d.resource.normalized_resource_gain,d.resource.interference_efficiency,d.resource.demand_match_gain,d.resource.coverage_duty_pct/100]}],{...layout,title:"Flexible Payload Indicators"},cfg);
+ reactChart("p_chain",[{type:"scatter",mode:"lines+markers",x:d.chain.map(x=>x.stage),y:d.chain.map(x=>x.level_dbw)}],{...layout,title:"RF Signal Level [dBW]"},cfg);
+ reactChart("p_archchart",[{type:"bar",x:["Flexibility","Complexity"],y:[d.system.flexibility_score,d.system.complexity_score]}],{...layout,title:payloadObj().architecture,yaxis:{range:[0,100]}},cfg);
+ reactChart("p_powerstack",[{type:"bar",x:["PA DC","Regen","Converters","Channelizer","Routing"],y:[d.power.pa_dc_w,d.digital.regenerative_power_w,d.digital.converter_power_w,d.digital.channelizer_power_w,d.digital.routing_power_w]}],{...layout,title:"Payload Power Stack [W]"},cfg);
+ reactChart("p_flex",[{type:"bar",x:["Resource gain","Interference eff.","Demand match","Coverage duty"],y:[d.resource.normalized_resource_gain,d.resource.interference_efficiency,d.resource.demand_match_gain,d.resource.coverage_duty_pct/100]}],{...layout,title:"Flexible Payload Indicators"},cfg);
 
  $("p_sinr").textContent=d.resource.mean_sinr_db+" dB"; $("p_p5sinr").textContent=d.resource.p5_sinr_db+" dB";
  $("p_evm").textContent=d.waveform.evm_pct+" %"; $("p_aclr").textContent=d.waveform.aclr_proxy_db+" dB";
  $("p_schedkpi").textContent=d.traffic.scheduler; $("p_preckpi").textContent=d.resource.precoding_enabled?d.resource.precoding_method:"MRT";
- Plotly.react("p_sinrchart",[{type:"bar",x:d.interference.sinr.map(x=>"U"+x.user),y:d.interference.sinr.map(x=>x.sinr_db)}],{...layout,title:"Per-user SINR [dB]"},cfg);
- Plotly.react("p_trafficmap",[{type:"bar",x:d.traffic.user_share.map((_,i)=>"U"+(i+1)),y:d.traffic.user_share}],{...layout,title:"User traffic share"},cfg);
- Plotly.react("p_precoder",[{type:"heatmap",z:d.interference.precoder_power_matrix}],{...layout,title:"|W|² precoder matrix"},cfg);
- Plotly.react("p_schedule",[
+ reactChart("p_sinrchart",[{type:"bar",x:d.interference.sinr.map(x=>"U"+x.user),y:d.interference.sinr.map(x=>x.sinr_db)}],{...layout,title:"Per-user SINR [dB]"},cfg);
+ reactChart("p_trafficmap",[{type:"bar",x:d.traffic.user_share.map((_,i)=>"U"+(i+1)),y:d.traffic.user_share}],{...layout,title:"User traffic share"},cfg);
+ reactChart("p_precoder",[{type:"heatmap",z:d.interference.precoder_power_matrix}],{...layout,title:"|W|² precoder matrix"},cfg);
+ reactChart("p_schedule",[
  {type:"heatmap",z:d.traffic.schedule,name:"Active beams"},
  {type:"scatter",mode:"lines+markers",x:d.traffic.slot_mean_sinr_db.map((_,i)=>i),y:d.traffic.slot_mean_sinr_db,yaxis:"y2",name:"Slot mean SINR"}
 ],{...layout,title:`Beam hopping · OFDM PAPR ${d.waveform.actual_papr_db} dB`,xaxis:{title:"Time slot"},yaxis:{title:"Beam activity"},yaxis2:{title:"SINR dB",overlaying:"y",side:"right"}},cfg);
@@ -103,10 +117,10 @@ function renderPayload(d){
  $("p_minelev").textContent=validElev.length?Math.min(...validElev).toFixed(1)+"°":"—";
  const validRange=d.geometry.user_range_km.filter(v=>v!==null);
  $("p_maxrange").textContent=validRange.length?Math.max(...validRange).toFixed(0)+" km":"—";
- Plotly.react("p_userthroughput",[{type:"bar",x:d.traffic.user_throughput_mbps.map((_,i)=>"U"+(i+1)),y:d.traffic.user_throughput_mbps}],{...layout,title:"Scheduled User Throughput [Mbps]"},cfg);
+ reactChart("p_userthroughput",[{type:"bar",x:d.traffic.user_throughput_mbps.map((_,i)=>"U"+(i+1)),y:d.traffic.user_throughput_mbps}],{...layout,title:"Scheduled User Throughput [Mbps]"},cfg);
  const ux=d.geometry.users.map(x=>x.lon), uy=d.geometry.users.map(x=>x.lat);
  const bx=d.geometry.beam_centers.map(x=>x.lon), by=d.geometry.beam_centers.map(x=>x.lat);
- Plotly.react("p_geomap",[
+ reactChart("p_geomap",[
    {type:"scatter",mode:"markers+text",name:"Users",x:ux,y:uy,text:ux.map((_,i)=>"U"+(i+1)),textposition:"top center"},
    {type:"scatter",mode:"markers",name:"Beam centers",x:bx,y:by,marker:{size:13,symbol:"x",color:KASA.red}}
  ],{...layout,title:`Geometry channel · ${d.geometry.region}`,xaxis:{title:"Longitude °"},yaxis:{title:"Latitude °"}},cfg);
@@ -115,9 +129,77 @@ function renderPayload(d){
 function renderRad(d){
  $("r_mtid").textContent=d.dose.mission_tid_krad+" krad"; $("r_use").textContent=d.dose.tid_usage_pct+" %"; $("r_sday").textContent=d.see.seu_day;
  $("r_msel").textContent=d.see.mission_sel; $("r_av").textContent=d.service.electronics_availability_pct+" %"; $("r_risk").textContent=d.risk.class;
- Plotly.react("r_dosechart",[{type:"bar",x:["TID use","DD use","Risk"],y:[d.dose.tid_usage_pct,d.dose.dd_usage_pct,d.risk.score_pct]}],{...layout,title:"Radiation Budget [%]"},cfg);
- Plotly.react("r_service",[{type:"indicator",mode:"gauge+number",value:d.risk.score_pct,title:{text:"System Radiation Risk"},gauge:{axis:{range:[0,100]}}}],{...layout},cfg);
+ reactChart("r_dosechart",[{type:"bar",x:["TID use","DD use","Risk"],y:[d.dose.tid_usage_pct,d.dose.dd_usage_pct,d.risk.score_pct]}],{...layout,title:"Radiation Budget [%]"},cfg);
+ reactChart("r_service",[{type:"indicator",mode:"gauge+number",value:d.risk.score_pct,title:{text:"System Radiation Risk"},gauge:{axis:{range:[0,100]}}}],{...layout},cfg);
  warnings("r_warn",d.warnings);
+}
+
+function renderSat(d){
+ $("s_eff").textContent=d.device.pa_eff_pct+" %"; $("s_padc").textContent=d.device.pa_dc_w+" W";
+ $("s_heat").textContent=d.payload.heat_w+" W"; $("s_mass").textContent=d.payload.mass_kg+" kg";
+ $("s_snr").textContent=d.link.snr_db+" dB"; $("s_agg").textContent=d.link.aggregate_gbps+" Gbps";
+ reactChart("s_powerchart",[{type:"bar",x:["PA DC","Other payload","Total payload"],y:[d.device.pa_dc_w,Math.max(0,d.payload.power_w-d.device.pa_dc_w),d.payload.power_w]}],{...layout,title:"Semiconductor → Payload Power [W]"},cfg);
+ warnings("s_warn",d.warnings);
+}
+
+function renderBeam(d){
+ $("b_req").textContent=d.compute.required_tops+" TOPS"; $("b_margin").textContent=d.compute.margin_x+"×";
+ $("b_total").textContent=d.power.total_w+" W"; $("b_pmargin").textContent=d.power.margin_w+" W";
+ $("b_effbeams").textContent=d.compute.effective_beams; $("b_grating").textContent=d.quality.grating_lobe_risk;
+ reactChart("b_powerchart",[{type:"bar",x:["Converters","Processor","Phase control"],y:[d.power.converter_w,d.power.processor_w,d.power.phase_control_w]}],{...layout,title:"Beamforming Power Breakdown [W]"},cfg);
+ reactChart("b_gauge",[{type:"indicator",mode:"gauge+number",value:d.compute.effective_beams,title:{text:"Effective Beams"},gauge:{axis:{range:[0,Math.max(1,parseInt($("g_beams").value))]}}}],{...layout},cfg);
+ warnings("b_warn",d.warnings);
+}
+
+async function renderOrbit(){
+ const rows=await post("/api/satcom/orbit-sweep",satObj());
+ reactChart("s_orbit",[
+  {type:"bar",name:"SNR dB",x:rows.map(r=>r.altitude_km+" km"),y:rows.map(r=>r.snr_db)},
+  {type:"scatter",mode:"lines+markers",name:"Footprint radius km",x:rows.map(r=>r.altitude_km+" km"),y:rows.map(r=>r.footprint_radius_km),yaxis:"y2"}
+ ],{...layout,title:"Orbit altitude sweep (500 / 888 / 1280 km)",xaxis:{title:"Altitude"},yaxis:{title:"SNR dB"},yaxis2:{title:"Footprint km",overlaying:"y",side:"right"}},cfg);
+}
+
+function integratedObj(){
+ return {satcom:satObj(),beam:beamObj(),radiation:radObj(),payload:payloadObj()}
+}
+
+function renderCenter(d){
+ const i=d.integrated;
+ $("c_capacity").textContent=i.effective_capacity_gbps+" Gbps"; $("c_mass").textContent=i.total_mass_kg+" kg";
+ $("c_power").textContent=i.payload_power_w+" W"; $("c_avail").textContent=i.availability_pct+" %";
+ $("c_cost").textContent="$"+i.total_cost_proxy_musd+"M"; $("c_service").textContent=i.service_index;
+
+ reactChart("centerRadar",[{
+  type:"scatterpolar",
+  r:[i.scores.Power,i.scores.Mass,i.scores.Capacity,i.scores.Reliability,i.scores.Thermal,i.scores.Power],
+  theta:["Power","Mass","Capacity","Reliability","Thermal","Power"],fill:"toself"
+ }],{...layout,polar:{bgcolor:"rgba(0,0,0,0)",radialaxis:{range:[0,100],gridcolor:"#1b3b50"}},showlegend:false},cfg);
+
+ reactChart("centerPower",[{
+  type:"bar",x:["Semiconductor","Beamforming","RF Payload"],
+  y:[d.satcom.payload.power_w,d.beamforming.power.total_w,d.payload.power.total_w]
+ }],{...layout,title:"Power by subsystem [W]"},cfg);
+
+ $("bottleneckBoard").innerHTML=i.bottlenecks.map(b=>`<div class="bottleneck"><strong>${b}</strong></div>`).join("");
+ $("systemFlow").innerHTML=i.chain.map((c,n)=>`<div class="flow-stage ${c.status.toLowerCase()}"><span class="n">0${n+1}</span><span class="name">${c.stage}</span><span class="metric">${c.metric}</span><span class="status">${c.status}</span></div>`).join("");
+
+ $("impactSemi").textContent=`${d.satcom.device.pa_eff_pct}% eff`;
+ $("impactBeam").textContent=`${d.beamforming.compute.effective_beams} beams`;
+ $("impactPayload").textContent=`${d.payload.power.total_w} W / ${d.payload.system.mass_kg} kg`;
+ $("impactRad").textContent=`${d.radiation.service.electronics_availability_pct} %`;
+ $("impactSvc").textContent=`${i.effective_capacity_gbps} Gbps`;
+}
+
+async function runIntegrated(msg){
+ const d=await post("/api/integrated",integratedObj());
+ lastIntegrated=d;
+ renderSat(d.satcom);
+ renderBeam(d.beamforming);
+ renderPayload(d.payload);
+ renderRad(d.radiation);
+ renderCenter(d);
+ if(msg) trace(msg);
+ return d;
 }
 
 $("syncBtn").onclick=()=>{syncGlobalToLabs();runIntegrated("Global mission parameters propagated across Semiconductor → Beamforming → RF Payload → Radiation → Service.");renderOrbit()};
@@ -167,7 +249,7 @@ async function runOptimizer(){
    ["o_bestcap","o_bestmass","o_bestpower","o_bestcost"].forEach(id=>$(id).textContent="—");
  }
  renderOptTable(rows);
- Plotly.react("o_pareto",[{
+ reactChart("o_pareto",[{
    type:"scatter",mode:"markers",
    x:rows.map(r=>r.mass_kg),y:rows.map(r=>r.capacity_gbps),
    text:rows.map(r=>`${r.material}/${r.processor}<br>${r.altitude_km} km<br>$${r.cost_musd}M`),
@@ -181,7 +263,7 @@ $("o_run").onclick=runOptimizer;
 async function runSensitivity(){
  const body={base:integratedObj(),parameter:$("sen_param").value,low:num("sen_low"),high:num("sen_high"),steps:9};
  const d=await post("/api/sensitivity",body),rows=d.rows;
- Plotly.react("o_sensitivity",[
+ reactChart("o_sensitivity",[
    {type:"scatter",mode:"lines+markers",name:"Capacity Gbps",x:rows.map(r=>r.x),y:rows.map(r=>r.effective_capacity_gbps)},
    {type:"scatter",mode:"lines+markers",name:"Mass kg",x:rows.map(r=>r.x),y:rows.map(r=>r.total_mass_kg),yaxis:"y2"}
  ],{...layout,title:`Sensitivity: ${d.parameter}`,xaxis:{title:d.parameter},yaxis:{title:"Gbps"},yaxis2:{title:"kg",overlaying:"y",side:"right"},legend:{orientation:"h"}},cfg);
@@ -228,12 +310,12 @@ async function runCoverage(){
  $("cv_sea").textContent=by["Southeast Asia"].availability_pct+" %";
  const minReg=Math.min(...d.regions.map(x=>x.availability_pct));
  if($("c_regmin")) $("c_regmin").textContent=minReg+" %";
- Plotly.react("cv_regions",[{
+ reactChart("cv_regions",[{
    type:"bar",x:d.regions.map(x=>x.region),y:d.regions.map(x=>x.availability_pct),name:"Availability"
  },{
    type:"bar",x:d.regions.map(x=>x.region),y:d.regions.map(x=>x.continuity_pct),name:"Continuity"
  }],{...layout,barmode:"group",title:"Regional availability proxy [%]",yaxis:{range:[0,100]}},cfg);
- Plotly.react("cv_visible",[{
+ reactChart("cv_visible",[{
    type:"scatter",mode:"markers+text",x:d.regions.map(x=>x.latitude_deg),y:d.regions.map(x=>x.mean_visible_proxy),
    text:d.regions.map(x=>x.region),textposition:"top center",marker:{size:14,color:KASA.red}
  }],{...layout,title:"Latitude vs mean visible proxy",xaxis:{title:"Latitude °"},yaxis:{title:"Mean visible proxy"}},cfg);
@@ -244,7 +326,7 @@ $("cv_run").onclick=async()=>{await runCoverage();trace("Constellation geometry 
 
 $("cv_sweep").onclick=async()=>{
  const rows=await post("/api/coverage-sweep",coverageObj());
- Plotly.react("cv_sweepchart",[{
+ reactChart("cv_sweepchart",[{
   type:"scatter",mode:"markers",
   x:rows.map(r=>r.total_sats),y:rows.map(r=>r.min_region_availability_pct),
   text:rows.map(r=>`${r.planes}×${r.sats_per_plane}`),
@@ -273,7 +355,7 @@ async function runMonteCarlo(){
  $("mc_costp90").textContent="$"+m.cost_musd.p90+"M";
  if($("c_mc")) $("c_mc").textContent=d.success_probability_pct+" %";
 
- Plotly.react("mc_hist",[{
+ reactChart("mc_hist",[{
    type:"histogram",x:d.samples.map(x=>x.capacity_gbps),nbinsx:24
  }],{...layout,title:"Effective capacity distribution",xaxis:{title:"Gbps"},yaxis:{title:"Count"}},cfg);
 
@@ -281,7 +363,7 @@ async function runMonteCarlo(){
  const p10=[m.capacity_gbps.p10,m.power_w.p10,m.mass_kg.p10,m.cost_musd.p10];
  const p50=[m.capacity_gbps.p50,m.power_w.p50,m.mass_kg.p50,m.cost_musd.p50];
  const p90=[m.capacity_gbps.p90,m.power_w.p90,m.mass_kg.p90,m.cost_musd.p90];
- Plotly.react("mc_band",[
+ reactChart("mc_band",[
   {type:"bar",name:"P10",x:names,y:p10},
   {type:"bar",name:"P50",x:names,y:p50},
   {type:"bar",name:"P90",x:names,y:p90}
@@ -293,7 +375,7 @@ async function runMonteCarlo(){
    Math.min(100,100*num("mc_pmax")/Math.max(m.power_w.p90,0.01)),
    Math.min(100,100*num("mc_mmax")/Math.max(m.mass_kg.p90,0.01))
  ];
- Plotly.react("mc_radar",[{
+ reactChart("mc_radar",[{
    type:"scatterpolar",r:[...robust,robust[0]],theta:["Success","Capacity margin","Power margin","Mass margin","Success"],fill:"toself"
  }],{...layout,polar:{bgcolor:"rgba(0,0,0,0)",radialaxis:{range:[0,100],gridcolor:"#1b3b50"}},showlegend:false},cfg);
  $("mc_note").textContent=d.note;
@@ -335,7 +417,7 @@ async function runPoisson(){
   left_potential_v:0,right_potential_v:num("po_vr"),grid_points:121,model:$("po_model").value,temperature_k:num("po_temp"),intrinsic_cm3:num("po_ni"),carrier_sign:1,max_iterations:80,tolerance_v:1e-7
  };
  const d=await post("/api/poisson-device",body);
- Plotly.react("po_chart",[
+ reactChart("po_chart",[
   {type:"scatter",mode:"lines",name:"Potential [V]",x:d.x_um,y:d.potential_v},
   {type:"scatter",mode:"lines",name:"E field [V/m]",x:d.x_um,y:d.electric_field_v_m,yaxis:"y2"}
  ],{...layout,title:"Poisson solution: potential & electric field",xaxis:{title:"x [μm]"},yaxis:{title:"Potential [V]"},yaxis2:{title:"E [V/m]",overlaying:"y",side:"right"},legend:{orientation:"h"}},cfg);
@@ -356,7 +438,7 @@ async function runPropagation(){
  const base=propagationObj(), rates=[1,5,10,20,30,40,50,75,100];
  const vals=[];
  for(const R of rates){const q=await post("/api/propagation",{...base,rain_rate_mm_h:R});vals.push(q.rain_attenuation_db)}
- Plotly.react("pr_curve",[{type:"scatter",mode:"lines+markers",x:rates,y:vals}],{...layout,title:`Rain attenuation at ${base.frequency_ghz} GHz`,xaxis:{title:"Rain rate [mm/h]"},yaxis:{title:"Attenuation [dB]"}},cfg);
+ reactChart("pr_curve",[{type:"scatter",mode:"lines+markers",x:rates,y:vals}],{...layout,title:`Rain attenuation at ${base.frequency_ghz} GHz`,xaxis:{title:"Rain rate [mm/h]"},yaxis:{title:"Attenuation [dB]"}},cfg);
  $("pr_note").textContent=d.physics+" "+d.boundary;
 }
 $("pr_run").onclick=runPropagation;
@@ -368,7 +450,7 @@ function timelineObj(){
 }
 async function runTimeline(){
  const d=await post("/api/pass-timeline",timelineObj()),r=d.rows;
- Plotly.react("tl_chart",[
+ reactChart("tl_chart",[
   {type:"scatter",mode:"lines",name:"Visible sats",x:r.map(x=>x.time_min),y:r.map(x=>x.visible_count),line:{shape:"hv"}},
   {type:"scatter",mode:"lines",name:"Max elevation °",x:r.map(x=>x.time_min),y:r.map(x=>x.max_elevation_deg),yaxis:"y2"},
   {type:"scatter",mode:"lines",name:"Doppler kHz",x:r.map(x=>x.time_min),y:r.map(x=>x.best_doppler_khz),yaxis:"y3"}

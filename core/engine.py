@@ -412,8 +412,10 @@ def _sinr_np(H,W,total_tx_power_w,noise_dbm,stream_weights=None):
 def _sampled_hpa_metrics_np(order, samples, papr_db, obo_db, p, guard_fraction):
     n_target=max(512,min(16384,int(samples)))
     nfft=256
-    occupied=96
     oversample=4
+    guard=max(0.0,min(0.9,guard_fraction))
+    occupied=max(4,min(nfft-4,int(round(nfft*(1.0-guard)))))
+    occupied-=occupied%2
     symbol_len=nfft*oversample
     nsym=max(1,int(math.ceil(n_target/symbol_len)))
     m=int(round(math.sqrt(max(4,order))))
@@ -1164,7 +1166,10 @@ def payload(x:PayloadInput):
     mean_sinr=sum(sinr_vals)/len(sinr_vals) if sinr_vals else -99
     p5_sinr=sorted(sinr_vals)[max(0,int(.05*len(sinr_vals))-1)] if sinr_vals else -99
 
-    schedule,beam_load=_beam_hopping_schedule(traffic,x.beams,x.timeslots,x.scheduler,x.beam_hopping_duty)
+    # H may carry fewer columns than x.beams when geometry resolves fewer beams than users;
+    # the schedule must be built over H's actual beam count so scheduled indices stay in bounds.
+    n_beams_actual=H.shape[1] if H.size else x.beams
+    schedule,beam_load=_beam_hopping_schedule(traffic,n_beams_actual,x.timeslots,x.scheduler,x.beam_hopping_duty)
     beam_assignment=np.argmax(np.abs(H),axis=1).astype(int) if H.size else np.zeros(len(traffic),dtype=int)
     throughput=_schedule_throughput_physical(H,schedule,beam_assignment,traffic,x.bandwidth_mhz,
         x.geometry_total_tx_power_w,x.user_noise_dbm,x.precoding_method if x.precoding_enabled else "MRT",x.rzf_lambda,2.0)
@@ -1254,13 +1259,13 @@ class PropagationInput(BaseModel):
 class PassTimelineInput(BaseModel):
     altitude_km: float = 1280
     inclination_deg: float = 42
-    planes: int = 16
-    sats_per_plane: int = 8
+    planes: int = Field(16, ge=1, le=60)
+    sats_per_plane: int = Field(8, ge=1, le=60)
     walker_f: int = 1
     region: str = "Korea"
     min_elevation_deg: float = 20
-    duration_hours: float = 6
-    time_step_sec: float = 60
+    duration_hours: float = Field(6, ge=0.01, le=72)
+    time_step_sec: float = Field(60, ge=5, le=3600)
 
 class PoissonDeviceInput(BaseModel):
     thickness_um: float = 1.0
@@ -1582,17 +1587,17 @@ REGIONS = {
 class CoverageInput(BaseModel):
     altitude_km: float = 1280
     inclination_deg: float = 42
-    planes: int = 16
-    sats_per_plane: int = 8
+    planes: int = Field(16, ge=1, le=60)
+    sats_per_plane: int = Field(8, ge=1, le=60)
     min_elevation_deg: float = 20
     target_min_visible: int = 1
     walker_f: int = 1
-    duration_hours: float = 24
-    time_step_sec: float = 120
+    duration_hours: float = Field(24, ge=0.01, le=168)
+    time_step_sec: float = Field(120, ge=5, le=3600)
 
 class MonteCarloInput(BaseModel):
     base: IntegratedInput = IntegratedInput()
-    runs: int = 500
+    runs: int = Field(500, ge=1, le=5000)
     seed: int = 42
     rf_output_sigma_pct: float = 5
     pa_eff_sigma_pct: float = 6
