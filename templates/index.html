@@ -213,7 +213,8 @@
             <label>PA gain<input id="p_pg" value="28" type="number"></label>
             <label>Channels<input id="p_ch" value="16" type="number"></label>
           </div>
-          <div class="group-title">FLEXIBLE / REGENERATIVE PAYLOAD</div>
+          <details class="group-block">
+          <summary class="group-title">FLEXIBLE / REGENERATIVE PAYLOAD</summary>
           <div class="cols2">
             <label>PAPR dB<input id="p_papr" value="8" type="number" step=".5"></label>
             <label>Output backoff dB<input id="p_obo" value="3" type="number" step=".5"></label>
@@ -229,7 +230,9 @@
           <label>Regenerative stack<select id="p_stack"><option>PHY</option><option>PHY+MAC</option><option selected>gNB-DU</option><option>gNB Full</option></select></label>
           <label class="toggle-label"><input id="p_dpd" type="checkbox" checked> DPD enabled</label>
           <label class="toggle-label"><input id="p_prec" type="checkbox"> Precoding enabled</label>
-          <div class="group-title">SIGNAL / INTERFERENCE / TRAFFIC</div>
+          </details>
+          <details class="group-block">
+          <summary class="group-title">SIGNAL / INTERFERENCE / TRAFFIC</summary>
           <div class="cols2">
             <label>Users<input id="p_users" value="16" type="number"></label>
             <label>Coupling dB<input id="p_cpl" value="-18" type="number"></label>
@@ -243,7 +246,9 @@
           <label>Precoding method<select id="p_prec_method"><option>MRT</option><option>ZF</option><option selected>RZF</option></select></label>
           <label>Traffic pattern<select id="p_traffic"><option>Uniform</option><option selected>Hotspot</option><option>Edge-heavy</option></select></label>
           <label>Scheduler<select id="p_sched"><option>Round Robin</option><option>Max C/I</option><option selected>Proportional Fair</option></select></label>
-          <div class="group-title">GEOMETRY-RESOLVED CHANNEL</div>
+          </details>
+          <details class="group-block">
+          <summary class="group-title">GEOMETRY-RESOLVED CHANNEL</summary>
           <label class="toggle-label"><input id="p_geo" type="checkbox" checked> Use Walker geometry channel</label>
           <div class="cols2">
             <label>Region<select id="p_geo_region"><option selected>Korea</option><option>UAE</option><option>Southeast Asia</option></select></label>
@@ -255,6 +260,7 @@
             <label>Atmos loss dB<input id="p_geo_loss" value="1" type="number" step=".2"></label>
             <label>Total Tx W<input id="p_geo_tx" value="40" type="number"></label>
           </div>
+          </details>
 
         </div>
         <div class="lab-content">

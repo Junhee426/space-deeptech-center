@@ -22,6 +22,17 @@ async function post(url,obj){
  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
  if(!r.ok) throw Error(await r.text()); return r.json();
 }
+// Wraps a button's click handler so a slow request (Monte Carlo, Optimizer, ...) shows a
+// spinner and can't be double-submitted, instead of leaving the user staring at a static button.
+function withLoading(btn,fn){
+ return async(...args)=>{
+  if(btn.classList.contains("is-loading")) return;
+  btn.classList.add("is-loading"); btn.disabled=true; btn.setAttribute("aria-busy","true");
+  try{ return await fn(...args) }
+  catch(e){ console.error(e) }
+  finally{ btn.classList.remove("is-loading"); btn.disabled=false; btn.removeAttribute("aria-busy") }
+ }
+}
 function warnings(id,arr){$(id).innerHTML=(arr||[]).map(x=>"• "+x).join("<br>")}
 function trace(t){$("traceText").textContent=t}
 function show(v){
@@ -202,11 +213,11 @@ async function runIntegrated(msg){
  return d;
 }
 
-$("syncBtn").onclick=()=>{syncGlobalToLabs();runIntegrated("Global mission parameters propagated across Semiconductor → Beamforming → RF Payload → Radiation → Service.");renderOrbit()};
-$("s_run").onclick=()=>runIntegrated("Semiconductor changes propagated downstream to power, thermal, payload and service metrics.");
-$("b_run").onclick=()=>runIntegrated("Beamforming changes propagated to effective beams, payload power and service capacity.");
-$("p_run").onclick=()=>runIntegrated("RF payload architecture changes propagated to heat, radiator, mass and integrated mission metrics.");
-$("r_run").onclick=()=>runIntegrated("Radiation mitigation changes propagated to availability and effective service capacity.");
+$("syncBtn").onclick=withLoading($("syncBtn"),async()=>{syncGlobalToLabs();await runIntegrated("Global mission parameters propagated across Semiconductor → Beamforming → RF Payload → Radiation → Service.");await renderOrbit()});
+$("s_run").onclick=withLoading($("s_run"),()=>runIntegrated("Semiconductor changes propagated downstream to power, thermal, payload and service metrics."));
+$("b_run").onclick=withLoading($("b_run"),()=>runIntegrated("Beamforming changes propagated to effective beams, payload power and service capacity."));
+$("p_run").onclick=withLoading($("p_run"),()=>runIntegrated("RF payload architecture changes propagated to heat, radiator, mass and integrated mission metrics."));
+$("r_run").onclick=withLoading($("r_run"),()=>runIntegrated("Radiation mitigation changes propagated to availability and effective service capacity."));
 
 const announceGlobal=debounce((id)=>trace(`Global parameter changed: ${id.replace("g_","")} — press SYNC ALL LABS to propagate.`),120);
 ["g_alt","g_freq","g_bw","g_elem","g_beams"].forEach(id=>$(id).addEventListener("input",()=>announceGlobal(id)));
@@ -258,7 +269,7 @@ async function runOptimizer(){
  const rep=await post("/api/report-summary",integratedObj());
  $("o_summary").innerHTML=rep.bullets.map(x=>`<div class="summary-item">${x}</div>`).join("");
 }
-$("o_run").onclick=runOptimizer;
+$("o_run").onclick=withLoading($("o_run"),runOptimizer);
 
 async function runSensitivity(){
  const body={base:integratedObj(),parameter:$("sen_param").value,low:num("sen_low"),high:num("sen_high"),steps:9};
@@ -268,7 +279,7 @@ async function runSensitivity(){
    {type:"scatter",mode:"lines+markers",name:"Mass kg",x:rows.map(r=>r.x),y:rows.map(r=>r.total_mass_kg),yaxis:"y2"}
  ],{...layout,title:`Sensitivity: ${d.parameter}`,xaxis:{title:d.parameter},yaxis:{title:"Gbps"},yaxis2:{title:"kg",overlaying:"y",side:"right"},legend:{orientation:"h"}},cfg);
 }
-$("sen_run").onclick=runSensitivity;
+$("sen_run").onclick=withLoading($("sen_run"),runSensitivity);
 
 // Persistent scenario snapshot
 function saveScenario(){
@@ -322,9 +333,9 @@ async function runCoverage(){
  $("cv_note").textContent=d.note;
  return d;
 }
-$("cv_run").onclick=async()=>{await runCoverage();trace("Constellation geometry propagated to regional service visibility proxies.")};
+$("cv_run").onclick=withLoading($("cv_run"),async()=>{await runCoverage();trace("Constellation geometry propagated to regional service visibility proxies.")});
 
-$("cv_sweep").onclick=async()=>{
+$("cv_sweep").onclick=withLoading($("cv_sweep"),async()=>{
  const rows=await post("/api/coverage-sweep",coverageObj());
  reactChart("cv_sweepchart",[{
   type:"scatter",mode:"markers",
@@ -332,7 +343,7 @@ $("cv_sweep").onclick=async()=>{
   text:rows.map(r=>`${r.planes}×${r.sats_per_plane}`),
   marker:{size:rows.map(r=>8+r.planes/2)}
  }],{...layout,title:"Minimum regional availability vs satellite count",xaxis:{title:"Total satellites"},yaxis:{title:"Min regional availability %"}},cfg);
-};
+});
 
 function mcObj(){
  return {
@@ -381,7 +392,7 @@ async function runMonteCarlo(){
  $("mc_note").textContent=d.note;
  return d;
 }
-$("mc_run").onclick=async()=>{await runMonteCarlo();trace("Monte Carlo uncertainty propagated to mission robustness and success probability.")};
+$("mc_run").onclick=withLoading($("mc_run"),async()=>{await runMonteCarlo();trace("Monte Carlo uncertainty propagated to mission robustness and success probability.")});
 
 // Keep constellation altitude aligned with global bus by default.
 $("syncBtn").addEventListener("click",()=>{$("cv_alt").value=$("g_alt").value;});
@@ -423,7 +434,7 @@ async function runPoisson(){
  ],{...layout,title:"Poisson solution: potential & electric field",xaxis:{title:"x [μm]"},yaxis:{title:"Potential [V]"},yaxis2:{title:"E [V/m]",overlaying:"y",side:"right"},legend:{orientation:"h"}},cfg);
  $("po_note").textContent=d.max_numeric_error_v!==undefined?`${d.physics} · ${d.assumption} · error ${d.max_numeric_error_v.toExponential(2)} V`:`${d.physics} · ${d.boundary} · converged=${d.converged}, iterations=${d.iterations}`;
 }
-$("po_run").onclick=runPoisson;
+$("po_run").onclick=withLoading($("po_run"),runPoisson);
 
 function propagationObj(){
  return {frequency_ghz:num("pr_f"),elevation_deg:num("pr_el"),rain_rate_mm_h:num("pr_rain"),
@@ -441,7 +452,7 @@ async function runPropagation(){
  reactChart("pr_curve",[{type:"scatter",mode:"lines+markers",x:rates,y:vals}],{...layout,title:`Rain attenuation at ${base.frequency_ghz} GHz`,xaxis:{title:"Rain rate [mm/h]"},yaxis:{title:"Attenuation [dB]"}},cfg);
  $("pr_note").textContent=d.physics+" "+d.boundary;
 }
-$("pr_run").onclick=runPropagation;
+$("pr_run").onclick=withLoading($("pr_run"),runPropagation);
 
 function timelineObj(){
  return {altitude_km:num("cv_alt"),inclination_deg:num("cv_inc"),planes:parseInt($("cv_planes").value),
@@ -458,7 +469,7 @@ async function runTimeline(){
  yaxis:{title:"Visible sats"},yaxis2:{title:"Elevation °",overlaying:"y",side:"right"},
  yaxis3:{title:"Doppler kHz",overlaying:"y",side:"right",anchor:"free",position:.92},legend:{orientation:"h"}},cfg);
 }
-$("tl_run").onclick=runTimeline;
+$("tl_run").onclick=withLoading($("tl_run"),runTimeline);
 
 runPoisson();
 runPropagation();
