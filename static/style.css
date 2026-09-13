@@ -182,3 +182,11 @@ details.group-block summary.group-title::after{content:"+";font-size:13px;color:
 details.group-block[open] summary.group-title::after{content:"–"}
 details.group-block summary.group-title:hover{color:#fff}
 details.group-block>.cols2,details.group-block>label{margin-top:9px}
+
+/* Mission CONOPS: a schematic operational-concept picture that redraws itself
+   from the current design values instead of a static illustration. */
+.conops-panel{padding:16px;margin-top:13px}
+.conops-diagram{width:100%;margin-top:10px;border:1px solid #163c53;border-radius:12px;background:radial-gradient(circle at 50% 0%,rgba(79,159,199,.08),transparent 60%),#050f18}
+.conops-diagram svg{width:100%;height:auto;display:block}
+.conops-caption{margin:10px 2px 0;font-size:10px;color:var(--muted);letter-spacing:.02em}
+@media(max-width:700px){.conops-panel{padding:12px}}

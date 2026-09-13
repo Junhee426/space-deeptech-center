@@ -199,6 +199,86 @@ function renderCenter(d){
  $("impactPayload").textContent=`${d.payload.power.total_w} W / ${d.payload.system.mass_kg} kg`;
  $("impactRad").textContent=`${d.radiation.service.electronics_availability_pct} %`;
  $("impactSvc").textContent=`${i.effective_capacity_gbps} Gbps`;
+ renderConops();
+}
+
+// Mission CONOPS: a schematic (satellite, orbit, coverage cone, beams, feeder link, gateway)
+// rebuilt from the live design values on every input change — not a static illustration.
+// Pure client-side geometry (no API call), so it can redraw instantly as the user types.
+function renderConops(){
+ const W=900,H=320,groundY=248;
+ const alt=num("g_alt")||1280;
+ const freq=num("g_freq")||20;
+ const bw=num("g_bw")||100;
+ const elements=parseInt($("g_elem").value)||0;
+ const beams=Math.max(1,parseInt($("g_beams").value)||1);
+ const minElRaw=num("s_el");
+ const minEl=isFinite(minElRaw)?minElRaw:20;
+ const arch=$("p_arch")?$("p_arch").value:"Regenerative";
+ const planes=parseInt($("cv_planes").value)||1;
+ const spp=parseInt($("cv_spp").value)||1;
+ const totalSats=planes*spp;
+
+ const altPx=Math.max(10,Math.min(123,10+(alt-300)/(2000-300)*113));
+ const satX=W/2, satY=groundY-70-altPx;
+ const coneFactor=Math.max(.15,Math.min(1,(85-minEl)/75));
+ const halfWidth=70+coneFactor*230;
+ const nBeams=Math.min(beams,7), extraBeams=beams-nBeams;
+ const archShort=arch==="Bent-Pipe"?"BENT-PIPE":arch==="Flexible Digital"?"FLEXIBLE DIGITAL":"REGENERATIVE";
+ const archLabel=arch==="Bent-Pipe"?"BENT-PIPE · relay only":arch==="Flexible Digital"?"FLEXIBLE DIGITAL · channelizer + hop":"REGENERATIVE · onboard DU";
+
+ const orbitLeftX=satX-280, orbitRightX=satX+280, orbitY=satY+26;
+ const extraSatCount=Math.min(5,Math.max(0,totalSats-1));
+ let constellationDots="";
+ for(let i=0;i<extraSatCount;i++){
+  const t=(i+1)/(extraSatCount+1);
+  const cx=(1-t)*(1-t)*orbitLeftX+2*(1-t)*t*satX+t*t*orbitRightX;
+  const cy=(1-t)*(1-t)*orbitY+2*(1-t)*t*(satY-24)+t*t*orbitY;
+  if(Math.abs(cx-satX)<40) continue;
+  constellationDots+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" style="fill:#4f9fc7;opacity:.55"/>`;
+ }
+
+ let beamLines="",terminals="";
+ for(let i=0;i<nBeams;i++){
+  const t=nBeams===1?.5:i/(nBeams-1);
+  const bx=satX-halfWidth*.82+t*halfWidth*1.64;
+  beamLines+=`<line x1="${satX}" y1="${(satY+18).toFixed(1)}" x2="${bx.toFixed(1)}" y2="${groundY}" style="stroke:#F94239;stroke-width:1.4;opacity:.55"/>`;
+  terminals+=`<g transform="translate(${bx.toFixed(1)},${groundY})"><rect x="-5" y="-4" width="10" height="8" rx="1.5" style="fill:#0d2b42;stroke:#7ec8df;stroke-width:1"/><line x1="0" y1="-4" x2="0" y2="-11" style="stroke:#7ec8df;stroke-width:1.3"/></g>`;
+ }
+
+ const gwX=90,gwY=groundY;
+ $("conopsDiagram").innerHTML=`
+ <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mission operational concept diagram">
+  <title>Mission CONOPS: ${archShort}, ${alt} km altitude, ${beams} beams, ${totalSats} satellites</title>
+  <path d="M0,${groundY} Q${W/2},${groundY+22} ${W},${groundY} L${W},${H} L0,${H} Z" style="fill:#08203099"/>
+  <line x1="0" y1="${groundY}" x2="${W}" y2="${groundY}" style="stroke:#1c4661;stroke-width:1"/>
+  <path d="M${orbitLeftX},${orbitY} Q${satX},${(satY-24).toFixed(1)} ${orbitRightX},${orbitY}" style="fill:none;stroke:#2c5a74;stroke-width:1;stroke-dasharray:3 5"/>
+  ${constellationDots}
+  <polygon points="${satX},${(satY+14).toFixed(1)} ${(satX-halfWidth).toFixed(1)},${groundY} ${(satX+halfWidth).toFixed(1)},${groundY}" style="fill:#7ec8df;opacity:.08"/>
+  <line x1="${satX}" y1="${(satY+14).toFixed(1)}" x2="${(satX-halfWidth).toFixed(1)}" y2="${groundY}" style="stroke:#2c5a74;stroke-width:1"/>
+  <line x1="${satX}" y1="${(satY+14).toFixed(1)}" x2="${(satX+halfWidth).toFixed(1)}" y2="${groundY}" style="stroke:#2c5a74;stroke-width:1"/>
+  ${beamLines}
+  ${terminals}
+  <line x1="${gwX}" y1="${gwY-14}" x2="${satX-10}" y2="${(satY+22).toFixed(1)}" style="stroke:#d6b66d;stroke-width:1.4;stroke-dasharray:2 4"/>
+  <g transform="translate(${gwX},${gwY})">
+   <rect x="-9" y="-14" width="18" height="14" rx="2" style="fill:#0d2b42;stroke:#d6b66d;stroke-width:1.2"/>
+   <circle cx="0" cy="-18" r="5" style="fill:none;stroke:#d6b66d;stroke-width:1.4"/>
+  </g>
+  <text x="${gwX}" y="${gwY+16}" text-anchor="middle" style="fill:#c9b98a;font-size:9px;font-weight:700">GATEWAY</text>
+  <g transform="translate(${satX},${satY.toFixed(1)})">
+   <rect x="-7" y="-9" width="14" height="18" rx="2" style="fill:#0d2b42;stroke:#7ec8df;stroke-width:1.4"/>
+   <rect x="-30" y="-3" width="20" height="6" style="fill:#12384f;stroke:#4f9fc7;stroke-width:1"/>
+   <rect x="10" y="-3" width="20" height="6" style="fill:#12384f;stroke:#4f9fc7;stroke-width:1"/>
+  </g>
+  <text x="${satX}" y="${(satY-16).toFixed(1)}" text-anchor="middle" style="fill:#fff;font-size:10px;font-weight:800">SAT-1</text>
+  <text x="${satX}" y="${(satY-30).toFixed(1)}" text-anchor="middle" style="fill:#f68d87;font-size:9px;font-weight:700">${archLabel}</text>
+  <text x="${(gwX+satX)/2-30}" y="${((gwY+satY)/2+30).toFixed(1)}" style="fill:#e7d6a8;font-size:9px">Feeder ${freq} GHz</text>
+  <text x="${(satX+halfWidth*.4).toFixed(1)}" y="${((satY+groundY)/2-6).toFixed(1)}" style="fill:#f6a09b;font-size:9px">${beams} beam${beams>1?"s":""}${extraBeams>0?` (+${extraBeams})`:""}</text>
+  <text x="${satX}" y="${groundY-8}" text-anchor="middle" style="fill:#7ea9bd;font-size:9px">≥${minEl}° elevation</text>
+  <text x="16" y="24" style="fill:#8fb2c8;font-size:9px">ALTITUDE</text>
+  <text x="16" y="40" style="fill:#fff;font-size:15px;font-weight:800">${alt} km</text>
+ </svg>`;
+ $("conopsCaption").textContent=`${archShort} · ${alt} km, ${minEl}° min elevation · ${beams} beam${beams>1?"s":""} across ${elements||"—"} elements · ${planes}×${spp} Walker (${totalSats} sats) · Feeder ${freq} GHz / ${bw} MHz`;
 }
 
 async function runIntegrated(msg){
@@ -222,9 +302,16 @@ $("r_run").onclick=withLoading($("r_run"),()=>runIntegrated("Radiation mitigatio
 const announceGlobal=debounce((id)=>trace(`Global parameter changed: ${id.replace("g_","")} — press SYNC ALL LABS to propagate.`),120);
 ["g_alt","g_freq","g_bw","g_elem","g_beams"].forEach(id=>$(id).addEventListener("input",()=>announceGlobal(id)));
 
+// Mission CONOPS redraws instantly from these fields alone (pure client-side geometry),
+// so it doesn't need to wait for a RUN/SYNC click the way the physics panels do.
+const debounceConops=debounce(renderConops,100);
+["g_alt","g_freq","g_bw","g_elem","g_beams","s_el","cv_planes","cv_spp"].forEach(id=>{ if($(id)) $(id).addEventListener("input",debounceConops) });
+if($("p_arch")) $("p_arch").addEventListener("change",renderConops);
+
 syncGlobalToLabs();
 runIntegrated();
 renderOrbit();
+renderConops();
 
 
 function optimizerObj(){
