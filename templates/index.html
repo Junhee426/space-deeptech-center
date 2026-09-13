@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Space Deep Tech Center V0.6</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+<div class="stars"></div>
+
+<header class="main-header">
+  <div>
+    <div class="eyebrow">SPACE DEEP TECH CENTER · V0.6</div>
+    <h1>Physics-Core Space Payload & Constellation Engineering Center</h1>
+    <p>반도체 → 디지털 빔포밍 → RF 탑재체 → 방사선 → 위성 링크 → 서비스까지 하나의 시나리오로 연결</p>
+  </div>
+  <div class="header-badges"><span>4 LABS</span><span>1 SCENARIO BUS</span><span>LIVE PROPAGATION</span><span>KASA NAVY / RED</span><span>FAST/FULL ENGINE</span></div>
+</header>
+
+<section class="mission-bar">
+  <div class="mission-title"><span>GLOBAL MISSION BUS</span><b id="scenarioName">K-LEO Deep-Tech Scenario</b></div>
+  <label>Altitude <input id="g_alt" value="1280" type="number"><small>km</small></label>
+  <label>Frequency <input id="g_freq" value="20" type="number"><small>GHz</small></label>
+  <label>Bandwidth <input id="g_bw" value="100" type="number"><small>MHz</small></label>
+  <label>Elements <input id="g_elem" value="256" type="number"></label>
+  <label>Beams <input id="g_beams" value="8" type="number"></label>
+  <button id="syncBtn">SYNC ALL LABS</button>
+</section>
+
+<div class="shell">
+  <aside class="side-nav">
+    <button class="nav-item active" data-view="center"><span>00</span><b>Mission Control</b><small>전체 연결성</small></button>
+    <button class="nav-item" data-view="satcom"><span>01</span><b>Semiconductor</b><small>Device → Link</small></button>
+    <button class="nav-item" data-view="beam"><span>02</span><b>Beamforming</b><small>Compute → Beam</small></button>
+    <button class="nav-item" data-view="payload"><span>03</span><b>RF Payload</b><small>Chain → Thermal</small></button>
+    <button class="nav-item" data-view="rad"><span>04</span><b>Radiation</b><small>Device → Service</small></button>
+<button class="nav-item" data-view="optimizer"><span>05</span><b>Optimizer</b><small>Pareto / Sensitivity</small></button>
+<button class="nav-item" data-view="constellation"><span>06</span><b>Constellation</b><small>Walker / Regions</small></button>
+<button class="nav-item" data-view="uncertainty"><span>07</span><b>Monte Carlo</b><small>P10 / P50 / P90</small></button>
+<button class="nav-item" data-view="theory"><span>08</span><b>Physics Core</b><small>Equations / Assumptions</small></button>
+<button class="nav-item" data-view="propagation"><span>09</span><b>Propagation</b><small>Rain / Pass / Doppler</small></button>
+  </aside>
+
+  <main>
+    <section id="center" class="view active">
+      <div class="top-grid">
+        <div class="panel system-map-card">
+          <div class="section-title"><span>LIVE SYSTEM MAP</span><b>Cause → Effect</b></div>
+          <div id="systemFlow" class="system-flow"></div>
+          <div class="trace-line">
+            <span class="pulse"></span>
+            <p id="traceText">Global mission inputs are synchronized across all laboratories.</p>
+          </div>
+        </div>
+        <div class="panel cockpit">
+          <div class="section-title"><span>MISSION COCKPIT</span><b>Integrated KPIs</b></div>
+          <div class="cockpit-grid">
+            <div><span>Effective Capacity</span><b id="c_capacity">—</b></div>
+            <div><span>Total Mass</span><b id="c_mass">—</b></div>
+            <div><span>Payload Power</span><b id="c_power">—</b></div>
+            <div><span>Availability</span><b id="c_avail">—</b></div>
+            <div><span>Cost Proxy</span><b id="c_cost">—</b></div>
+            <div><span>Service Index</span><b id="c_service">—</b></div>
+<div><span>MC Success</span><b id="c_mc">—</b></div>
+<div><span>Regional Min</span><b id="c_regmin">—</b></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-grid">
+        <div class="panel chart-panel">
+          <div class="section-title"><span>SYSTEM BALANCE</span><b>5-axis score</b></div>
+          <div id="centerRadar"></div>
+        </div>
+        <div class="panel chart-panel">
+          <div class="section-title"><span>ENERGY FLOW</span><b>Where power goes</b></div>
+          <div id="centerPower"></div>
+        </div>
+        <div class="panel chart-panel wide">
+          <div class="section-title"><span>DESIGN BOTTLENECKS</span><b>What limits the mission now?</b></div>
+          <div id="bottleneckBoard" class="bottleneck-board"></div>
+        </div>
+      </div>
+
+      
+      <div class="panel physics-strip">
+        <div class="section-title"><span>PHYSICS STATUS</span><b>Fundamental equations vs engineering models</b></div>
+        <div class="physics-badges">
+          <div><b>ORBIT</b><span>Kepler + Earth rotation</span></div>
+          <div><b>LINK</b><span>Friis + kTB</span></div>
+          <div><b>CAPACITY</b><span>Shannon + gap Γ</span></div>
+          <div><b>ANTENNA</b><span>Aperture gain</span></div>
+          <div><b>THERMAL</b><span>Stefan–Boltzmann</span></div>
+          <div class="eng"><b>ENGINEERING</b><span>mass / cost / radiation scaling</span></div>
+        </div>
+      </div>
+
+      <div class="panel impact-panel">
+        <div class="section-title"><span>IMPACT CHAIN</span><b>현재 설계가 다른 Lab에 미치는 영향</b></div>
+        <div class="impact-grid">
+          <div><span>Semiconductor</span><b id="impactSemi">—</b><small>PA 효율 → 전력/열</small></div>
+          <i>→</i>
+          <div><span>Beamforming</span><b id="impactBeam">—</b><small>TOPS/Power → 유효 빔</small></div>
+          <i>→</i>
+          <div><span>RF Payload</span><b id="impactPayload">—</b><small>Power/Heat → 질량</small></div>
+          <i>→</i>
+          <div><span>Radiation</span><b id="impactRad">—</b><small>Availability → 실효용량</small></div>
+          <i>→</i>
+          <div><span>Service</span><b id="impactSvc">—</b><small>최종 Gbps</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="satcom" class="view">
+      <div class="lab-title"><div><span>LAB 01</span><h2>SatCom Semiconductor Lab</h2><p>소자 선택이 전력·열·질량·링크·비용까지 어떻게 전파되는지 분석</p></div><button class="run-lab" id="s_run">RUN & PROPAGATE</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <div class="group-title">DEVICE</div>
+          <label>Material<select id="s_material"><option>Si</option><option>SiGe</option><option>GaAs</option><option selected>GaN</option><option>SiC</option></select></label>
+          <label>PA Part<select id="s_pa"><option selected>PA-GaN-Ka-20W</option><option>PA-GaAs-Ka-10W</option><option>PA-GaN-Ka-50W</option></select></label>
+          <label>LNA Part<select id="s_lna"><option selected>LNA-GaAs-Ka</option><option>LNA-SiGe-Ka</option></select></label>
+
+          <div class="group-title">LINK / PLATFORM</div>
+          <div class="cols2">
+            <label>RF W<input id="s_rf" value="20" type="number"></label>
+            <label>Min El °<input id="s_el" value="20" type="number"></label>
+            <label>Tx Gain<input id="s_tx" value="34" type="number"></label>
+            <label>Rx Gain<input id="s_rx" value="42" type="number"></label>
+            <label>Loss dB<input id="s_loss" value="3" type="number"></label>
+            <label>Dish m<input id="s_dia" value=".45" step=".05" type="number"></label>
+            <label>Bus W<input id="s_bus" value="1800" type="number"></label>
+            <label>Payload %<input id="s_pshare" value="50" type="number"></label>
+            <label>Proc TOPS<input id="s_tops" value="2" step=".1" type="number"></label>
+            <label>Coding gap dB<input id="s_gap" value="2" step=".5" type="number"></label>
+            <label>Atm/Rain loss dB<input id="s_atm" value="0" step=".5" type="number"></label>
+            <label>Radiator K<input id="s_rtemp" value="323.15" step="5" type="number"></label>
+            <label>Emissivity<input id="s_eps" value=".85" step=".05" type="number"></label>
+          </div>
+        </div>
+
+        <div class="lab-content">
+          <div class="metrics six">
+            <div><span>PA Efficiency</span><b id="s_eff">—</b></div><div><span>PA DC</span><b id="s_padc">—</b></div>
+            <div><span>Waste Heat</span><b id="s_heat">—</b></div><div><span>Payload Mass</span><b id="s_mass">—</b></div>
+            <div><span>SNR</span><b id="s_snr">—</b></div><div><span>Aggregate</span><b id="s_agg">—</b></div>
+          </div>
+          <div class="panel path-card">
+            <div class="mini-flow"><b>Material</b><i>→</i><b>PA/LNA</b><i>→</i><b>Power & Heat</b><i>→</i><b>Payload Mass</b><i>→</i><b>Link</b></div>
+          </div>
+          <div class="charts"><div class="panel"><div id="s_powerchart"></div></div><div class="panel"><div id="s_orbit"></div></div></div>
+          
+          <div class="panel poisson-panel">
+            <div class="section-title"><span>DEVICE ELECTROSTATICS</span><b>1D Poisson finite-difference solver</b></div>
+            <div class="poisson-layout">
+              <div class="poisson-controls">
+                <label>Thickness μm<input id="po_L" value="1" type="number" step=".1"></label>
+                <label>Net doping cm⁻³<input id="po_N" value="1e15" type="number"></label>
+                <label>εr<input id="po_eps" value="11.7" type="number" step=".1"></label>
+                <label>Right potential V<input id="po_vr" value=".5" type="number" step=".1"></label>
+<label>Model<select id="po_model"><option selected>Depletion</option><option>Poisson-Boltzmann</option></select></label>
+<label>Temperature K<input id="po_temp" value="300" type="number"></label>
+<label>Intrinsic cm⁻³<input id="po_ni" value="1e10" type="number"></label>
+                <button id="po_run">SOLVE POISSON</button>
+              </div>
+              <div id="po_chart"></div>
+            </div>
+            <div class="physics-note" id="po_note"></div>
+          </div>
+<div class="panel warn" id="s_warn"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="beam" class="view">
+      <div class="lab-title"><div><span>LAB 02</span><h2>Digital Beamforming Chip Lab</h2><p>배열 규모와 빔 수가 ADC/DAC·연산량·전력·실제 운용 가능한 빔 수를 어떻게 제한하는지 분석</p></div><button class="run-lab" id="b_run">RUN & PROPAGATE</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <label>Architecture<select id="b_arch"><option>Analog</option><option>Hybrid</option><option selected>Fully Digital</option></select></label>
+          <label>Processor<select id="b_proc"><option selected>FPGA</option><option>ASIC</option></select></label>
+          <div class="cols2">
+            <label>Sample GS/s<input id="b_gsps" value="1" step=".1" type="number"></label>
+            <label>ADC bits<input id="b_bits" value="12" type="number"></label>
+            <label>TOPS<input id="b_tops" value="2" step=".1" type="number"></label>
+            <label>Power W<input id="b_power" value="180" type="number"></label>
+            <label>Phase bits<input id="b_phase" value="6" type="number"></label>
+            <label>Cal err °<input id="b_cal" value="2" step=".5" type="number"></label>
+            <label>d/λ<input id="b_space" value=".5" step=".05" type="number"></label><label>Max scan °<input id="b_scan" value="60" step="5" type="number"></label>
+          </div>
+        </div>
+        <div class="lab-content">
+          <div class="metrics six"><div><span>Req TOPS</span><b id="b_req">—</b></div><div><span>Compute Margin</span><b id="b_margin">—</b></div><div><span>Total Power</span><b id="b_total">—</b></div><div><span>Power Margin</span><b id="b_pmargin">—</b></div><div><span>Effective Beams</span><b id="b_effbeams">—</b></div><div><span>Grating Risk</span><b id="b_grating">—</b></div></div>
+          <div class="panel path-card"><div class="mini-flow"><b>Elements</b><i>→</i><b>Converters</b><i>→</i><b>TOPS</b><i>→</i><b>Power</b><i>→</i><b>Effective Beams</b></div></div>
+          <div class="charts"><div class="panel"><div id="b_powerchart"></div></div><div class="panel"><div id="b_gauge"></div></div></div>
+          <div class="panel warn" id="b_warn"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="payload" class="view">
+      <div class="lab-title"><div><span>LAB 03</span><h2>RF Payload Designer</h2><p>RF chain, architecture, beamforming 전력을 실제 탑재체 전력·열·radiator·질량으로 통합</p></div><button class="run-lab" id="p_run">RUN & PROPAGATE</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <label>Architecture<select id="p_arch"><option>Bent-Pipe</option><option selected>Regenerative</option><option>Flexible Digital</option></select></label>
+          <div class="cols2">
+            <label>Input dBW<input id="p_in" value="-115" type="number"></label>
+            <label>LNA gain<input id="p_lg" value="30" type="number"></label>
+            <label>LNA NF<input id="p_nf" value="1.3" step=".1" type="number"></label>
+            <label>Filter loss<input id="p_fl" value="1" step=".1" type="number"></label>
+            <label>Mixer loss<input id="p_ml" value="6" type="number"></label>
+            <label>Channelizer loss<input id="p_cl" value="1.5" step=".1" type="number"></label>
+            <label>Switch loss<input id="p_sl" value="1" step=".1" type="number"></label>
+            <label>PA gain<input id="p_pg" value="28" type="number"></label>
+            <label>Channels<input id="p_ch" value="16" type="number"></label>
+          </div>
+          <div class="group-title">FLEXIBLE / REGENERATIVE PAYLOAD</div>
+          <div class="cols2">
+            <label>PAPR dB<input id="p_papr" value="8" type="number" step=".5"></label>
+            <label>Output backoff dB<input id="p_obo" value="3" type="number" step=".5"></label>
+            <label>Rapp p<input id="p_rapp" value="3" type="number" step=".5"></label>
+            <label>Frequency reuse<input id="p_reuse" value="4" type="number"></label>
+            <label>BH duty<input id="p_bhduty" value=".5" type="number" step=".1"></label>
+            <label>Hotspot factor<input id="p_hotspot" value="2" type="number" step=".25"></label>
+            <label>Channel gran. MHz<input id="p_gran" value="5" type="number"></label>
+            <label>Matrix inputs<input id="p_mi" value="8" type="number"></label>
+            <label>Matrix outputs<input id="p_mo" value="8" type="number"></label>
+            <label>ISL offload<input id="p_isl" value="0" type="number" step=".1"></label>
+          </div>
+          <label>Regenerative stack<select id="p_stack"><option>PHY</option><option>PHY+MAC</option><option selected>gNB-DU</option><option>gNB Full</option></select></label>
+          <label class="toggle-label"><input id="p_dpd" type="checkbox" checked> DPD enabled</label>
+          <label class="toggle-label"><input id="p_prec" type="checkbox"> Precoding enabled</label>
+          <div class="group-title">SIGNAL / INTERFERENCE / TRAFFIC</div>
+          <div class="cols2">
+            <label>Users<input id="p_users" value="16" type="number"></label>
+            <label>Coupling dB<input id="p_cpl" value="-18" type="number"></label>
+            <label>Desired dBm<input id="p_sig" value="-80" type="number"></label>
+            <label>Noise dBm<input id="p_noise" value="-100" type="number"></label>
+            <label>RZF λ<input id="p_lambda" value=".1" type="number" step=".05"></label>
+            <label>Time slots<input id="p_slots" value="16" type="number"></label>
+            <label>HPA samples<input id="p_samples" value="2048" type="number"></label>
+            <label>QAM order<input id="p_qam" value="16" type="number"></label>
+          </div>
+          <label>Precoding method<select id="p_prec_method"><option>MRT</option><option>ZF</option><option selected>RZF</option></select></label>
+          <label>Traffic pattern<select id="p_traffic"><option>Uniform</option><option selected>Hotspot</option><option>Edge-heavy</option></select></label>
+          <label>Scheduler<select id="p_sched"><option>Round Robin</option><option>Max C/I</option><option selected>Proportional Fair</option></select></label>
+          <div class="group-title">GEOMETRY-RESOLVED CHANNEL</div>
+          <label class="toggle-label"><input id="p_geo" type="checkbox" checked> Use Walker geometry channel</label>
+          <div class="cols2">
+            <label>Region<select id="p_geo_region"><option selected>Korea</option><option>UAE</option><option>Southeast Asia</option></select></label>
+            <label>Time min<input id="p_geo_time" value="0" type="number" step="1"></label>
+            <label>User radius km<input id="p_geo_radius" value="250" type="number"></label>
+            <label>Min elev °<input id="p_geo_el" value="10" type="number"></label>
+            <label>HPBW °<input id="p_geo_hpbw" value="2.5" type="number" step=".1"></label>
+            <label>Terminal gain dBi<input id="p_geo_gr" value="32" type="number"></label>
+            <label>Atmos loss dB<input id="p_geo_loss" value="1" type="number" step=".2"></label>
+            <label>Total Tx W<input id="p_geo_tx" value="40" type="number"></label>
+          </div>
+
+        </div>
+        <div class="lab-content">
+          <div class="metrics six"><div><span>RF Output</span><b id="p_out">—</b></div><div><span>Total Power</span><b id="p_total">—</b></div><div><span>Heat</span><b id="p_heat">—</b></div><div><span>Radiator</span><b id="p_rad">—</b></div><div><span>Mass</span><b id="p_mass">—</b></div><div><span>Service Index</span><b id="p_service">—</b></div></div><div class="metrics six"><div><span>HPA Compression</span><b id="p_comp">—</b></div><div><span>Linearity</span><b id="p_lin">—</b></div><div><span>Avg RF</span><b id="p_avgrf">—</b></div><div><span>Channelizer</span><b id="p_bins">—</b></div><div><span>BH Gain</span><b id="p_bhgain">—</b></div><div><span>Feeder Load</span><b id="p_feeder">—</b></div></div><div class="metrics six"><div><span>Mean SINR</span><b id="p_sinr">—</b></div><div><span>5% SINR</span><b id="p_p5sinr">—</b></div><div><span>EVM</span><b id="p_evm">—</b></div><div><span>ACLR proxy</span><b id="p_aclr">—</b></div><div><span>Scheduler</span><b id="p_schedkpi">—</b></div><div><span>Precoding</span><b id="p_preckpi">—</b></div></div><div class="metrics six"><div><span>Channel Source</span><b id="p_chsource">—</b></div><div><span>Scheduled Capacity</span><b id="p_schedcap">—</b></div><div><span>Serving Sat</span><b id="p_servsat">—</b></div><div><span>User Min Elev</span><b id="p_minelev">—</b></div><div><span>User Max Range</span><b id="p_maxrange">—</b></div><div><span>Compute Mode</span><b>NumPy</b></div></div>
+          <div class="panel path-card"><div class="mini-flow"><b>ANT</b><i>→</i><b>LNA</b><i>→</i><b>Mixer</b><i>→</i><b>Channelizer</b><i>→</i><b>PA</b><i>→</i><b>Array</b></div></div>
+          <div class="charts"><div class="panel"><div id="p_chain"></div></div><div class="panel"><div id="p_archchart"></div></div></div><div class="charts"><div class="panel"><div id="p_powerstack"></div></div><div class="panel"><div id="p_flex"></div></div></div><div class="charts"><div class="panel"><div id="p_sinrchart"></div></div><div class="panel"><div id="p_trafficmap"></div></div></div>
+          <div class="charts"><div class="panel"><div id="p_precoder"></div></div><div class="panel"><div id="p_schedule"></div></div></div><div class="charts"><div class="panel"><div id="p_geomap"></div></div><div class="panel"><div id="p_userthroughput"></div></div></div>
+          <div class="panel warn" id="p_warn"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="rad" class="view">
+      <div class="lab-title"><div><span>LAB 04</span><h2>Space Radiation Lab</h2><p>우주환경 이벤트가 단품 고장을 넘어 위성 및 군집 서비스 가용도에 미치는 영향을 시각화</p></div><button class="run-lab" id="r_run">RUN & PROPAGATE</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <label>Mitigation<select id="r_mit"><option>None</option><option>ECC</option><option>TMR</option><option selected>TMR+Scrub</option></select></label>
+          <div class="cols2">
+            <label>Mission yr<input id="r_year" value="5" type="number"></label><label>Al mm<input id="r_shield" value="2" step=".5" type="number"></label>
+            <label>TID krad/yr<input id="r_tid" value="2" step=".5" type="number"></label><label>TID tol<input id="r_tidt" value="30" type="number"></label>
+            <label>DD arb/yr<input id="r_dd" value="1" step=".2" type="number"></label><label>DD tol<input id="r_ddt" value="10" type="number"></label>
+            <label>SEU/dev/day<input id="r_seu" value=".002" step=".001" type="number"></label><label>SEL/dev/day<input id="r_sel" value=".00002" step=".00001" type="number"></label>
+            <label>Devices<input id="r_dev" value="25" type="number"></label><label>Scrub min<input id="r_scrub" value="10" type="number"></label>
+            <label>Spares<input id="r_spares" value="1" type="number"></label><label>Fleet nodes<input id="r_nodes" value="128" type="number"></label>
+          </div>
+        </div>
+        <div class="lab-content">
+          <div class="metrics six"><div><span>Mission TID</span><b id="r_mtid">—</b></div><div><span>TID Use</span><b id="r_use">—</b></div><div><span>SEU/day</span><b id="r_sday">—</b></div><div><span>Mission SEL</span><b id="r_msel">—</b></div><div><span>Availability</span><b id="r_av">—</b></div><div><span>Risk</span><b id="r_risk">—</b></div></div>
+          <div class="panel path-card"><div class="mini-flow"><b>Environment</b><i>→</i><b>TID/DD/SEE</b><i>→</i><b>Device</b><i>→</i><b>Subsystem</b><i>→</i><b>Satellite</b><i>→</i><b>Service</b></div></div>
+          <div class="charts"><div class="panel"><div id="r_dosechart"></div></div><div class="panel"><div id="r_service"></div></div></div>
+          <div class="panel warn" id="r_warn"></div>
+        </div>
+      </div>
+    </section>
+  
+    <section id="optimizer" class="view">
+      <div class="lab-title"><div><span>LAB 05</span><h2>System Design Optimizer</h2><p>질량·전력·용량·비용·가용도 제약을 동시에 만족하는 설계 조합을 자동 탐색</p></div><button class="run-lab" id="o_run">RUN OPTIMIZER</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <div class="group-title">CONSTRAINTS</div>
+          <div class="cols2">
+            <label>Max mass kg<input id="o_mass" value="500" type="number"></label>
+            <label>Max power W<input id="o_power" value="1200" type="number"></label>
+            <label>Min Gbps<input id="o_cap" value="2" type="number" step=".5"></label>
+            <label>Min beams<input id="o_beams" value="4" type="number"></label>
+            <label>Min avail %<input id="o_avail" value="99.9" type="number" step=".01"></label>
+            <label>Max cost $M<input id="o_cost" value="100" type="number"></label>
+          </div>
+          <label>Allowed radiation risk<select id="o_risk"><option>LOW</option><option selected>MEDIUM</option><option>HIGH</option></select></label>
+          <label>Objective<select id="o_obj"><option selected>Balanced</option><option>Lowest Cost</option><option>Highest Capacity</option><option>Lowest Mass</option></select></label>
+
+          <div class="group-title">SENSITIVITY</div>
+          <label>Parameter<select id="sen_param"><option>rf_output_w</option><option>bandwidth_mhz</option><option>beams</option><option>elements</option><option>altitude_km</option><option>shielding_mm_al</option></select></label>
+          <div class="cols2"><label>Low<input id="sen_low" value="10" type="number"></label><label>High<input id="sen_high" value="40" type="number"></label></div>
+          <button id="sen_run">RUN SENSITIVITY</button>
+        </div>
+        <div class="lab-content">
+          <div class="metrics six">
+            <div><span>Feasible Designs</span><b id="o_count">—</b></div>
+            <div><span>Best Capacity</span><b id="o_bestcap">—</b></div>
+            <div><span>Best Mass</span><b id="o_bestmass">—</b></div>
+            <div><span>Best Power</span><b id="o_bestpower">—</b></div>
+            <div><span>Best Cost</span><b id="o_bestcost">—</b></div>
+            <div><span>Selected Objective</span><b id="o_objlabel">—</b></div>
+          </div>
+          <div class="charts"><div class="panel"><div id="o_pareto"></div></div><div class="panel"><div id="o_sensitivity"></div></div></div>
+          <div class="panel table-panel"><div class="section-title"><span>TOP DESIGN CANDIDATES</span><b>Best 20 feasible combinations</b></div><div class="table-wrap"><table id="o_table"><thead></thead><tbody></tbody></table></div></div>
+          <div class="panel report-panel"><div class="section-title"><span>EXECUTIVE SUMMARY</span><b>Report-ready interpretation</b></div><div id="o_summary"></div></div>
+        </div>
+      </div>
+    </section>
+
+  
+    <section id="constellation" class="view">
+      <div class="lab-title"><div><span>LAB 06</span><h2>Walker Constellation & Regional Coverage</h2><p>500·888·1,280 km, 42° 경사각, 궤도면/면당 위성 수가 한국·UAE·동남아 가시성 프록시에 미치는 영향</p></div><button class="run-lab" id="cv_run">RUN COVERAGE</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <div class="group-title">CONSTELLATION</div>
+          <div class="cols2">
+            <label>Altitude km<input id="cv_alt" value="1280" type="number"></label>
+            <label>Inclination °<input id="cv_inc" value="42" type="number"></label>
+            <label>Planes<input id="cv_planes" value="16" type="number"></label>
+            <label>Sats / plane<input id="cv_spp" value="8" type="number"></label>
+            <label>Min elevation °<input id="cv_el" value="20" type="number"></label>
+            <label>Min visible<input id="cv_minvis" value="1" type="number"></label>
+            <label>Walker F<input id="cv_f" value="1" type="number"></label>
+            <label>Duration h<input id="cv_hours" value="24" type="number"></label>
+            <label>Step sec<input id="cv_step" value="120" type="number"></label>
+          </div>
+          <button id="cv_sweep">SWEEP WALKER OPTIONS</button>
+        </div>
+        <div class="lab-content">
+          <div class="metrics six">
+            <div><span>Total Satellites</span><b id="cv_total">—</b></div>
+            <div><span>Footprint Radius</span><b id="cv_foot">—</b></div>
+            <div><span>Global Overlap</span><b id="cv_overlap">—</b></div>
+            <div><span>Korea</span><b id="cv_kr">—</b></div>
+            <div><span>UAE</span><b id="cv_uae">—</b></div>
+            <div><span>SE Asia</span><b id="cv_sea">—</b></div>
+          </div>
+          <div class="charts"><div class="panel"><div id="cv_regions"></div></div><div class="panel"><div id="cv_visible"></div></div></div>
+          <div class="panel"><div class="section-title"><span>WALKER OPTIONS</span><b>planes × sats/plane</b></div><div id="cv_sweepchart"></div></div>
+          
+          <div class="panel timeline-panel">
+            <div class="section-title"><span>TIME DOMAIN</span><b>Visible count / elevation / Doppler</b></div>
+            <div class="timeline-toolbar">
+              <label>Region<select id="tl_region"><option>Korea</option><option>UAE</option><option>Southeast Asia</option></select></label>
+              <label>Hours<input id="tl_hours" value="6" type="number"></label>
+              <label>Step sec<input id="tl_step" value="60" type="number"></label>
+              <button id="tl_run">RUN PASS TIMELINE</button>
+            </div>
+            <div id="tl_chart"></div>
+          </div>
+<div class="panel warn" id="cv_note"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="uncertainty" class="view">
+      <div class="lab-title"><div><span>LAB 07</span><h2>Monte Carlo Uncertainty Lab</h2><p>부품·손실·연산·방사선·질량·비용 불확실성을 동시에 반영해 설계 성공확률과 P10/P50/P90을 계산</p></div><button class="run-lab" id="mc_run">RUN MONTE CARLO</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <div class="group-title">RUN CONTROL</div>
+          <div class="cols2">
+            <label>Runs<input id="mc_runs" value="500" type="number"></label>
+            <label>Seed<input id="mc_seed" value="42" type="number"></label>
+            <label>RF σ %<input id="mc_rf" value="5" type="number"></label>
+            <label>Loss σ dB<input id="mc_loss" value=".8" step=".1" type="number"></label>
+            <label>BW σ %<input id="mc_bw" value="5" type="number"></label>
+            <label>TOPS σ %<input id="mc_tops" value="8" type="number"></label>
+            <label>TID σ %<input id="mc_tid" value="20" type="number"></label>
+            <label>SEU σ %<input id="mc_seu" value="25" type="number"></label>
+            <label>Mass σ %<input id="mc_mass" value="4" type="number"></label>
+            <label>Cost σ %<input id="mc_cost" value="8" type="number"></label>
+            <label>Min Gbps<input id="mc_cap" value="2" type="number"></label>
+            <label>Max power W<input id="mc_pmax" value="1200" type="number"></label>
+            <label>Max mass kg<input id="mc_mmax" value="500" type="number"></label>
+          </div>
+        </div>
+        <div class="lab-content">
+          <div class="metrics six">
+            <div><span>Success Probability</span><b id="mc_success">—</b></div>
+            <div><span>Capacity P50</span><b id="mc_cp50">—</b></div>
+            <div><span>Capacity P10</span><b id="mc_cp10">—</b></div>
+            <div><span>Power P90</span><b id="mc_pp90">—</b></div>
+            <div><span>Mass P90</span><b id="mc_mp90">—</b></div>
+            <div><span>Cost P90</span><b id="mc_costp90">—</b></div>
+          </div>
+          <div class="charts"><div class="panel"><div id="mc_hist"></div></div><div class="panel"><div id="mc_band"></div></div></div>
+          <div class="panel"><div class="section-title"><span>ROBUSTNESS</span><b>P10 / P50 / P90</b></div><div id="mc_radar"></div></div>
+          <div class="panel warn" id="mc_note"></div>
+        </div>
+      </div>
+    </section>
+
+  
+    <section id="theory" class="view">
+      <div class="lab-title"><div><span>LAB 08</span><h2>Physics Core & Model Inspector</h2><p>센터의 계산을 물리 법칙과 engineering model로 분리해 어떤 결과가 어디에서 왔는지 추적</p></div></div>
+      <div class="panel theory-hero">
+        <h3>계산 원칙</h3>
+        <p>기본 물리량은 가능한 한 SI 기반의 보존법칙·궤도역학·전자기학·통계역학 식으로 계산하고, 데이터가 필요한 질량·비용·방사선 내성은 별도의 engineering model로 표시합니다.</p>
+      </div>
+      <div class="physics-version">Physics Core <b id="physicsVersion">—</b> · <span id="physicsCount">—</span> registered models</div><div id="theoryGrid" class="theory-grid"></div>
+      <div class="panel model-boundary">
+        <div class="section-title"><span>MODEL BOUNDARIES</span><b>현재 상세 데이터가 필요한 영역</b></div>
+        <div id="engineeringModels"></div>
+      </div>
+    </section>
+
+  
+    <section id="propagation" class="view">
+      <div class="lab-title"><div><span>LAB 09</span><h2>Atmospheric & Orbital Propagation Lab</h2><p>ITU-R P.838 강우 감쇠와 시간변화 궤도 링크의 range·elevation·Doppler를 분리해 분석</p></div><button class="run-lab" id="pr_run">RUN PROPAGATION</button></div>
+      <div class="lab-layout">
+        <div class="panel form-card">
+          <div class="group-title">RAIN PROPAGATION</div>
+          <div class="cols2">
+            <label>Freq GHz<input id="pr_f" value="20" type="number"></label>
+            <label>Elevation °<input id="pr_el" value="30" type="number"></label>
+            <label>Rain mm/h<input id="pr_rain" value="25" type="number"></label>
+            <label>Rain height km<input id="pr_hr" value="5" type="number"></label>
+            <label>Station km<input id="pr_hs" value=".1" type="number" step=".1"></label>
+            <label>Path factor<input id="pr_red" value="1" type="number" step=".1"></label>
+          </div>
+          <label>Polarization<select id="pr_pol"><option selected>Circular</option><option>Horizontal</option><option>Vertical</option></select></label>
+        </div>
+        <div class="lab-content">
+          <div class="metrics six">
+            <div><span>k</span><b id="pr_k">—</b></div>
+            <div><span>α</span><b id="pr_alpha">—</b></div>
+            <div><span>γR</span><b id="pr_gamma">—</b></div>
+            <div><span>Rain path</span><b id="pr_path">—</b></div>
+            <div><span>Rain loss</span><b id="pr_loss">—</b></div>
+            <div><span>Model</span><b>P.838-3</b></div>
+          </div>
+          <div class="panel propagation-equation">
+            <div class="eq-big">γ<sub>R</sub> = k R<sup>α</sup></div>
+            <p>특정 감쇠는 ITU-R P.838-3, 총 감쇠는 표시된 rain-layer 기하 경로에 적용합니다.</p>
+          </div>
+          <div class="panel"><div id="pr_curve"></div></div>
+          <div class="panel warn" id="pr_note"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer>Space Deep Tech Center V0.6 · Integrated parametric engineering environment · Not qualification evidence.</footer>
+<script src="/static/app.js"></script>
+</body></html>
