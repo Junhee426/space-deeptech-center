@@ -1338,7 +1338,7 @@ def api_integrated(x: IntegratedInput):
         "frequency_ghz": x.satcom.frequency_ghz,
         "geometry_altitude_km": x.satcom.altitude_km,
         "geometry_total_tx_power_w": x.satcom.rf_output_w,
-        "geometry_inclination_deg": 42.0,
+        "geometry_inclination_deg": x.payload.geometry_inclination_deg,
     })
     p = payload(payload_in)
 
@@ -1451,7 +1451,7 @@ def integrated_calc(x: IntegratedInput):
         "frequency_ghz": x.satcom.frequency_ghz,
         "geometry_altitude_km": x.satcom.altitude_km,
         "geometry_total_tx_power_w": x.satcom.rf_output_w,
-        "geometry_inclination_deg": 42.0,
+        "geometry_inclination_deg": x.payload.geometry_inclination_deg,
     })
     p = payload(payload_in)
     r = radiation(x.radiation)

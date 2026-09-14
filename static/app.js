@@ -10,17 +10,60 @@ const layout={
  yaxis:{gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"}
 };
 const cfg={displayModeBar:false,responsive:true};
-let lastIntegrated=null;
-// Plotly can throw synchronously when drawing into a hidden (zero-width) tab,
-// e.g. while another lab's charts are refreshed by SYNC ALL LABS. Swallow that
-// so one hidden chart never aborts the rest of a render/propagate pass.
+let lastIntegrated=null,lastIntegratedInput=null;
+// Cache hidden charts and draw them only after their tab has a measurable width.
+const chartStates=new Map();
 function reactChart(id,traces,layoutObj,cfgObj){
- try{ Plotly.react(id,traces,layoutObj,cfgObj) }catch(e){ console.warn("Chart render skipped for #"+id,e) }
+ const state=chartStates.get(id)||{running:false};
+ Object.assign(state,{traces:structuredClone(traces),layout:structuredClone(layoutObj),config:cfgObj,dirty:true});
+ chartStates.set(id,state);
+ drawChart(id);
+}
+async function drawChart(id){
+ const el=$(id),state=chartStates.get(id);
+ if(!el||!state||state.running||!state.dirty||!el.closest('.view.active')||el.clientWidth<1)return;
+ state.running=true;state.dirty=false;
+ try{
+  el.classList.remove('chart-empty');
+  await Plotly.react(el,structuredClone(state.traces),{...structuredClone(state.layout),autosize:true,width:el.clientWidth},state.config);
+ }catch(error){
+  console.warn('Chart could not be drawn: '+id,error);
+  if(el.closest('.view.active'))el.setAttribute('aria-label','차트를 표시하지 못했습니다. 다시 실행해 주세요.');
+  else state.dirty=true;
+ }finally{state.running=false;if(state.dirty&&el.closest('.view.active'))requestAnimationFrame(()=>drawChart(id));}
+}
+function refreshVisibleCharts(){
+ for(const [id,state] of chartStates){if($(id).closest('.view.active')){state.dirty=true;drawChart(id);}}
+}
+window.addEventListener('resize',debounce(refreshVisibleCharts,150));
+let lastDesignKey=null,lastCalculatedAt=null,integratedRequest=0;
+function designKey(){return JSON.stringify(integratedObj());}
+function setMissionStatus(kind,message){
+ $('missionStatus').dataset.state=kind;
+ $('missionStatus').textContent=message+(lastCalculatedAt?' · 마지막 통합 계산 '+lastCalculatedAt:'');
+}
+function reportError(error){
+ console.warn(error);
+ setMissionStatus('error','계산 실패: '+error.message+' 기존 결과를 유지합니다. 입력값을 확인하고 다시 실행해 주세요.');
+ trace('계산 실패 — 현재 입력은 결과에 반영되지 않았습니다.');
+}
+function constellationObj(){
+ return {altitude_km:num('g_alt'),min_elevation_deg:num('s_el'),inclination_deg:num('cv_inc'),
+  planes:num('cv_planes'),sats_per_plane:num('cv_spp'),walker_f:num('cv_f')};
+}
+const sharedFields=[['g_alt','cv_alt'],['s_el','cv_el','p_geo_el'],['s_rf','p_geo_tx'],['s_tops','b_tops']];
+function syncSharedField(id){
+ for(const group of sharedFields){if(group.includes(id))group.forEach(peer=>$(peer).value=$(id).value);}
 }
 
 async function post(url,obj){
  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
- if(!r.ok) throw Error(await r.text()); return r.json();
+ if(!r.ok){
+  let detail='HTTP '+r.status;
+  try{const body=await r.json();detail=Array.isArray(body.detail)?body.detail.map(x=>x.loc.join('.')+': '+x.msg).join('; '):(body.detail||detail);}catch{}
+  throw Error(detail);
+ }
+ return r.json();
 }
 // Wraps a button's click handler so a slow request (Monte Carlo, Optimizer, ...) shows a
 // spinner and can't be double-submitted, instead of leaving the user staring at a static button.
@@ -28,8 +71,15 @@ function withLoading(btn,fn){
  return async(...args)=>{
   if(btn.classList.contains("is-loading")) return;
   btn.classList.add("is-loading"); btn.disabled=true; btn.setAttribute("aria-busy","true");
+  const previousError=btn.parentElement.querySelector('.action-error');
+  if(previousError)previousError.remove();
   try{ return await fn(...args) }
-  catch(e){ console.error(e) }
+  catch(e){
+   reportError(e);
+   const message=document.createElement('p');message.className='action-error';message.setAttribute('role','alert');
+   message.textContent='계산 실패: '+e.message+' 입력을 확인하고 다시 실행해 주세요.';
+   btn.insertAdjacentElement('afterend',message);
+  }
   finally{ btn.classList.remove("is-loading"); btn.disabled=false; btn.removeAttribute("aria-busy") }
  }
 }
@@ -39,19 +89,13 @@ function show(v){
  document.querySelectorAll(".view").forEach(x=>x.classList.remove("active")); $(v).classList.add("active");
  document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===v));
  window.scrollTo({top:0,behavior:"smooth"});
- // Charts drawn while a tab was hidden are skipped (see reactChart); redraw them now that it's visible.
- if(lastIntegrated){
-  if(v==="satcom") renderSat(lastIntegrated.satcom);
-  else if(v==="beam") renderBeam(lastIntegrated.beamforming);
-  else if(v==="payload") renderPayload(lastIntegrated.payload);
-  else if(v==="rad") renderRad(lastIntegrated.radiation);
-  else if(v==="center") renderCenter(lastIntegrated);
- }
+ requestAnimationFrame(refreshVisibleCharts);
+ if(v==='center')renderConops();
 }
 document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>show(b.dataset.view));
 
 function syncGlobalToLabs(){
- trace(`Mission bus synchronized: ${$("g_alt").value} km · ${$("g_freq").value} GHz · ${$("g_bw").value} MHz · ${$("g_elem").value} elements · ${$("g_beams").value} beams`);
+ trace(`Mission inputs: ${$("g_alt").value} km · ${$("g_freq").value} GHz · ${$("g_bw").value} MHz · ${$("g_elem").value} elements · ${$("g_beams").value} beams`);
 }
 
 function satObj(){
@@ -93,8 +137,8 @@ function payloadObj(){
  traffic_pattern:$("p_traffic").value,scheduler:$("p_sched").value,timeslots:parseInt($("p_slots").value),
  hpa_samples:parseInt($("p_samples").value),modulation_order:parseInt($("p_qam").value),aclr_guard_fraction:.15,
  geometry_channel_enabled:$("p_geo").checked,geometry_region:$("p_geo_region").value,geometry_time_min:num("p_geo_time"),
- geometry_user_radius_km:num("p_geo_radius"),geometry_satellite_count:1,geometry_inclination_deg:42,
- geometry_planes:16,geometry_sats_per_plane:8,geometry_walker_f:1,geometry_altitude_km:num("g_alt"),
+ geometry_user_radius_km:num("p_geo_radius"),geometry_satellite_count:1,geometry_inclination_deg:constellationObj().inclination_deg,
+ geometry_planes:constellationObj().planes,geometry_sats_per_plane:constellationObj().sats_per_plane,geometry_walker_f:constellationObj().walker_f,geometry_altitude_km:constellationObj().altitude_km,
  geometry_min_elevation_deg:num("p_geo_el"),geometry_terminal_gain_dbi:num("p_geo_gr"),
  geometry_beam_hpbw_deg:num("p_geo_hpbw"),geometry_atmospheric_loss_db:num("p_geo_loss"),
  geometry_total_tx_power_w:num("p_geo_tx"),analysis_mode:"Full"}
@@ -106,7 +150,7 @@ function renderPayload(d){
  $("p_avgrf").textContent=d.rf.average_rf_w+" W"; $("p_bins").textContent=d.digital.channelizer_bins_proxy;
  $("p_bhgain").textContent=d.resource.normalized_resource_gain+"×"; $("p_feeder").textContent=(d.resource.feeder_load_fraction*100).toFixed(0)+" %";
  reactChart("p_chain",[{type:"scatter",mode:"lines+markers",x:d.chain.map(x=>x.stage),y:d.chain.map(x=>x.level_dbw)}],{...layout,title:"RF Signal Level [dBW]"},cfg);
- reactChart("p_archchart",[{type:"bar",x:["Flexibility","Complexity"],y:[d.system.flexibility_score,d.system.complexity_score]}],{...layout,title:payloadObj().architecture,yaxis:{range:[0,100]}},cfg);
+ reactChart("p_archchart",[{type:"bar",x:["Flexibility","Complexity"],y:[d.system.flexibility_score,d.system.complexity_score]}],{...layout,title:lastIntegratedInput?.payload.architecture||payloadObj().architecture,yaxis:{range:[0,100]}},cfg);
  reactChart("p_powerstack",[{type:"bar",x:["PA DC","Regen","Converters","Channelizer","Routing"],y:[d.power.pa_dc_w,d.digital.regenerative_power_w,d.digital.converter_power_w,d.digital.channelizer_power_w,d.digital.routing_power_w]}],{...layout,title:"Payload Power Stack [W]"},cfg);
  reactChart("p_flex",[{type:"bar",x:["Resource gain","Interference eff.","Demand match","Coverage duty"],y:[d.resource.normalized_resource_gain,d.resource.interference_efficiency,d.resource.demand_match_gain,d.resource.coverage_duty_pct/100]}],{...layout,title:"Flexible Payload Indicators"},cfg);
 
@@ -163,7 +207,9 @@ function renderBeam(d){
 }
 
 async function renderOrbit(){
- const rows=await post("/api/satcom/orbit-sweep",satObj());
+ const input=satObj();
+ const rows=await post('/api/satcom/orbit-sweep',input);
+ if(JSON.stringify(input)!==JSON.stringify(satObj()))return;
  reactChart("s_orbit",[
   {type:"bar",name:"SNR dB",x:rows.map(r=>r.altitude_km+" km"),y:rows.map(r=>r.snr_db)},
   {type:"scatter",mode:"lines+markers",name:"Footprint radius km",x:rows.map(r=>r.altitude_km+" km"),y:rows.map(r=>r.footprint_radius_km),yaxis:"y2"}
@@ -202,88 +248,77 @@ function renderCenter(d){
  renderConops();
 }
 
-// Mission CONOPS: a schematic (satellite, orbit, coverage cone, beams, feeder link, gateway)
-// rebuilt from the live design values on every input change — not a static illustration.
-// Pure client-side geometry (no API call), so it can redraw instantly as the user types.
+// The diagram previews the shared mission; physical dimensions are relative proxies.
+function escapeMarkup(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function renderConops(){
- const W=900,H=320,groundY=248;
- const alt=num("g_alt")||1280;
- const freq=num("g_freq")||20;
- const bw=num("g_bw")||100;
- const elements=parseInt($("g_elem").value)||0;
- const beams=Math.max(1,parseInt($("g_beams").value)||1);
- const minElRaw=num("s_el");
- const minEl=isFinite(minElRaw)?minElRaw:20;
- const arch=$("p_arch")?$("p_arch").value:"Regenerative";
- const planes=parseInt($("cv_planes").value)||1;
- const spp=parseInt($("cv_spp").value)||1;
- const totalSats=planes*spp;
-
- const altPx=Math.max(10,Math.min(123,10+(alt-300)/(2000-300)*113));
- const satX=W/2, satY=groundY-70-altPx;
- const coneFactor=Math.max(.15,Math.min(1,(85-minEl)/75));
- const halfWidth=70+coneFactor*230;
- const nBeams=Math.min(beams,7), extraBeams=beams-nBeams;
- const archShort=arch==="Bent-Pipe"?"BENT-PIPE":arch==="Flexible Digital"?"FLEXIBLE DIGITAL":"REGENERATIVE";
- const archLabel=arch==="Bent-Pipe"?"BENT-PIPE · relay only":arch==="Flexible Digital"?"FLEXIBLE DIGITAL · channelizer + hop":"REGENERATIVE · onboard DU";
-
- const orbitLeftX=satX-280, orbitRightX=satX+280, orbitY=satY+26;
- const extraSatCount=Math.min(5,Math.max(0,totalSats-1));
- let constellationDots="";
- for(let i=0;i<extraSatCount;i++){
-  const t=(i+1)/(extraSatCount+1);
-  const cx=(1-t)*(1-t)*orbitLeftX+2*(1-t)*t*satX+t*t*orbitRightX;
-  const cy=(1-t)*(1-t)*orbitY+2*(1-t)*t*(satY-24)+t*t*orbitY;
-  if(Math.abs(cx-satX)<40) continue;
-  constellationDots+=`<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" style="fill:#4f9fc7;opacity:.55"/>`;
+ const orbit=constellationObj(),alt=orbit.altitude_km,minEl=orbit.min_elevation_deg;
+ const freq=num('g_freq'),bw=num('g_bw'),elements=num('g_elem'),beams=num('g_beams');
+ const valid=[alt,freq,bw,elements,beams,orbit.planes,orbit.sats_per_plane].every(v=>Number.isFinite(v)&&v>0)&&
+  [elements,beams,orbit.planes,orbit.sats_per_plane,orbit.walker_f].every(Number.isInteger)&&Number.isFinite(minEl)&&minEl>=0&&minEl<90&&Number.isFinite(orbit.inclination_deg);
+ if(!valid){
+  $('conopsDiagram').textContent='유효한 고도·주파수·빔 수·군집 설정을 입력하면 그림이 표시됩니다.';
+  $('conopsCaption').textContent='입력 확인 필요';$('conopsDetails').textContent='';return;
  }
-
- let beamLines="",terminals="";
- for(let i=0;i<nBeams;i++){
-  const t=nBeams===1?.5:i/(nBeams-1);
-  const bx=satX-halfWidth*.82+t*halfWidth*1.64;
-  beamLines+=`<line x1="${satX}" y1="${(satY+18).toFixed(1)}" x2="${bx.toFixed(1)}" y2="${groundY}" style="stroke:#F94239;stroke-width:1.4;opacity:.55"/>`;
-  terminals+=`<g transform="translate(${bx.toFixed(1)},${groundY})"><rect x="-5" y="-4" width="10" height="8" rx="1.5" style="fill:#0d2b42;stroke:#7ec8df;stroke-width:1"/><line x1="0" y1="-4" x2="0" y2="-11" style="stroke:#7ec8df;stroke-width:1.3"/></g>`;
+ const current=lastIntegrated&&lastDesignKey===designKey();
+ const result=current?lastIntegrated:null;
+ const mass=result?.integrated.total_mass_kg,power=result?.payload.power.total_w,radiator=result?.payload.power.radiator_m2;
+ const bodySize=result?Math.min(20,Math.max(10,Math.sqrt(mass)*.8)):12;
+ const wing=result?Math.min(90,Math.max(25,Math.sqrt(power)*2.2)):36;
+ const radiatorSize=result?Math.min(35,Math.max(6,Math.sqrt(radiator)*16)):10;
+ const arch=$('p_arch').value,stack=$('p_stack').value,beamArch=$('b_arch').value;
+ const archLabel=arch==='Bent-Pipe'?'Bent-Pipe · RF relay':arch+' · '+stack;
+ const isl=Math.max(0,Math.min(1,num('p_isl')||0));
+ const W=900,H=390,groundY=285,satX=450,satY=175-Math.max(0,Math.min(90,(alt-300)/1700*90));
+ const halfWidth=70+Math.max(.15,Math.min(1,(85-minEl)/75))*230;
+ const shown=Math.min(beams,7),total=orbit.planes*orbit.sats_per_plane;
+ let beamLines='',terminals='';
+ for(let n=0;n<shown;n++){
+  const x=satX+halfWidth*.82*(shown===1?0:2*n/(shown-1)-1);
+  beamLines+=`<path d="M${satX},${satY+bodySize} L${x},${groundY}" stroke="#F94239" stroke-width="1.5" opacity=".65"/>`;
+  terminals+=`<path d="M${x-5},${groundY} h10 v-8 h-10 z M${x},${groundY-8} v-8" fill="#12384f" stroke="#7ec8df"/>`;
  }
-
- const gwX=90,gwY=groundY;
- $("conopsDiagram").innerHTML=`
- <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mission operational concept diagram">
-  <title>Mission CONOPS: ${archShort}, ${alt} km altitude, ${beams} beams, ${totalSats} satellites</title>
-  <path d="M0,${groundY} Q${W/2},${groundY+22} ${W},${groundY} L${W},${H} L0,${H} Z" style="fill:#08203099"/>
-  <line x1="0" y1="${groundY}" x2="${W}" y2="${groundY}" style="stroke:#1c4661;stroke-width:1"/>
-  <path d="M${orbitLeftX},${orbitY} Q${satX},${(satY-24).toFixed(1)} ${orbitRightX},${orbitY}" style="fill:none;stroke:#2c5a74;stroke-width:1;stroke-dasharray:3 5"/>
-  ${constellationDots}
-  <polygon points="${satX},${(satY+14).toFixed(1)} ${(satX-halfWidth).toFixed(1)},${groundY} ${(satX+halfWidth).toFixed(1)},${groundY}" style="fill:#7ec8df;opacity:.08"/>
-  <line x1="${satX}" y1="${(satY+14).toFixed(1)}" x2="${(satX-halfWidth).toFixed(1)}" y2="${groundY}" style="stroke:#2c5a74;stroke-width:1"/>
-  <line x1="${satX}" y1="${(satY+14).toFixed(1)}" x2="${(satX+halfWidth).toFixed(1)}" y2="${groundY}" style="stroke:#2c5a74;stroke-width:1"/>
-  ${beamLines}
-  ${terminals}
-  <line x1="${gwX}" y1="${gwY-14}" x2="${satX-10}" y2="${(satY+22).toFixed(1)}" style="stroke:#d6b66d;stroke-width:1.4;stroke-dasharray:2 4"/>
-  <g transform="translate(${gwX},${gwY})">
-   <rect x="-9" y="-14" width="18" height="14" rx="2" style="fill:#0d2b42;stroke:#d6b66d;stroke-width:1.2"/>
-   <circle cx="0" cy="-18" r="5" style="fill:none;stroke:#d6b66d;stroke-width:1.4"/>
+ $('conopsDiagram').innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="conopsTitle conopsDesc">
+  <title id="conopsTitle">${escapeMarkup(archLabel)}, ${alt} km, ${beams} beams, ${total} satellites</title>
+  <desc id="conopsDesc">설계 입력 운용개념도. 실제 축척이 아닙니다. ${current?'위성 크기와 패널은 현재 계산 결과의 상대적 크기입니다.':'전력·열·질량을 계산하면 상대적 크기가 갱신됩니다.'}</desc>
+  <path d="M0,${groundY} Q450,320 900,${groundY} V390 H0 Z" fill="#0a2638"/>
+  <path d="M0,${groundY} H900" stroke="#315b75"/>
+  <path d="M145,${satY+35} Q450,${satY-45} 755,${satY+35}" fill="none" stroke="#4f9fc7" stroke-dasharray="4 6"/>
+  <path d="M450,${satY+bodySize} L${450-halfWidth},${groundY} H${450+halfWidth} Z" fill="#7ec8df" opacity=".08"/>
+  ${beamLines}${terminals}
+  <path d="M85,${groundY-20} L${satX-bodySize},${satY+bodySize}" stroke="#d6b66d" stroke-width="2" stroke-dasharray="4 5"/>
+  <g transform="translate(85,${groundY})" stroke="#d6b66d" fill="#12384f"><rect x="-12" y="-18" width="24" height="18"/><circle cy="-24" r="7"/></g>
+  <g id="conopsSatellite" transform="translate(${satX},${satY})">
+   <rect id="conopsBody" x="${-bodySize}" y="${-bodySize}" width="${bodySize*2}" height="${bodySize*2}" rx="3" fill="#153d56" stroke="#b8e6f3" stroke-width="2"/>
+   <g fill="#174a6b" stroke="#7ec8df"><rect id="conopsSolar" x="${-bodySize-wing-5}" y="-8" width="${wing}" height="16"/><rect x="${bodySize+5}" y="-8" width="${wing}" height="16"/></g>
+   <rect id="conopsRadiator" x="${bodySize+4}" y="13" width="${radiatorSize}" height="9" fill="#b1c5d0" stroke="#fff"/>
   </g>
-  <text x="${gwX}" y="${gwY+16}" text-anchor="middle" style="fill:#c9b98a;font-size:9px;font-weight:700">GATEWAY</text>
-  <g transform="translate(${satX},${satY.toFixed(1)})">
-   <rect x="-7" y="-9" width="14" height="18" rx="2" style="fill:#0d2b42;stroke:#7ec8df;stroke-width:1.4"/>
-   <rect x="-30" y="-3" width="20" height="6" style="fill:#12384f;stroke:#4f9fc7;stroke-width:1"/>
-   <rect x="10" y="-3" width="20" height="6" style="fill:#12384f;stroke:#4f9fc7;stroke-width:1"/>
+  ${isl>0?`<g id="conopsISL"><path d="M${satX+bodySize+wing+8},${satY} L735,${satY-15}" stroke="#9fbdf7" stroke-width="2" stroke-dasharray="6 4"/><rect x="735" y="${satY-22}" width="14" height="14" fill="#174a6b" stroke="#9fbdf7"/><text x="660" y="${satY-30}" fill="#c9d9ff">ISL ${Math.round(isl*100)}%</text></g>`:''}
+  <g fill="#dce8ee" font-size="14" font-family="system-ui,sans-serif">
+   <text x="20" y="28">ALTITUDE ${alt} km</text>
+   <text x="20" y="51">Walker ${orbit.planes} × ${orbit.sats_per_plane} · ${orbit.inclination_deg}° · F ${orbit.walker_f}</text>
+   <text x="450" y="${satY-bodySize-15}" text-anchor="middle" fill="#ffa39d">${escapeMarkup(archLabel)}</text>
+   <text x="450" y="${satY+bodySize+38}" text-anchor="middle">${escapeMarkup(beamArch)} · ${elements} elements</text>
+   <text x="85" y="${groundY+27}" text-anchor="middle" fill="#e7d6a8">GATEWAY</text>
+   <text x="148" y="${groundY-65}" fill="#e7d6a8">Feeder ${freq} GHz</text>
+   <text x="700" y="${groundY-40}" text-anchor="middle" fill="#ffa39d">${beams} beams · ${shown} shown</text>
+   <text x="450" y="${groundY+27}" text-anchor="middle">${minEl}° min elevation · ${bw} MHz</text>
+   <text x="450" y="362" text-anchor="middle" fill="#a9c4d4">${current?'계산 결과 반영 · 상대 크기':'입력 미리보기 · 크기는 계산 후 반영'} / Not to scale</text>
   </g>
-  <text x="${satX}" y="${(satY-16).toFixed(1)}" text-anchor="middle" style="fill:#fff;font-size:10px;font-weight:800">SAT-1</text>
-  <text x="${satX}" y="${(satY-30).toFixed(1)}" text-anchor="middle" style="fill:#f68d87;font-size:9px;font-weight:700">${archLabel}</text>
-  <text x="${(gwX+satX)/2-30}" y="${((gwY+satY)/2+30).toFixed(1)}" style="fill:#e7d6a8;font-size:9px">Feeder ${freq} GHz</text>
-  <text x="${(satX+halfWidth*.4).toFixed(1)}" y="${((satY+groundY)/2-6).toFixed(1)}" style="fill:#f6a09b;font-size:9px">${beams} beam${beams>1?"s":""}${extraBeams>0?` (+${extraBeams})`:""}</text>
-  <text x="${satX}" y="${groundY-8}" text-anchor="middle" style="fill:#7ea9bd;font-size:9px">≥${minEl}° elevation</text>
-  <text x="16" y="24" style="fill:#8fb2c8;font-size:9px">ALTITUDE</text>
-  <text x="16" y="40" style="fill:#fff;font-size:15px;font-weight:800">${alt} km</text>
  </svg>`;
- $("conopsCaption").textContent=`${archShort} · ${alt} km, ${minEl}° min elevation · ${beams} beam${beams>1?"s":""} across ${elements||"—"} elements · ${planes}×${spp} Walker (${totalSats} sats) · Feeder ${freq} GHz / ${bw} MHz`;
+ $('conopsCaption').textContent=`${archLabel} · ${alt} km · 최소 고도각 ${minEl}° · ${beams} beams (${shown}개 표시) · ${orbit.planes}×${orbit.sats_per_plane} Walker (${total} sats) · ${orbit.inclination_deg}° / F ${orbit.walker_f} · ${freq} GHz / ${bw} MHz`;
+ const details=current?[['위성 질량',mass+' kg'],['탑재체 전력',power+' W'],['열 부하',result.payload.power.heat_w+' W'],['방열판 면적',radiator+' m²']]:[['설계 상태','입력 미리보기'],['크기 반영','RUN 또는 SYNC 후 갱신']];
+ $('conopsDetails').innerHTML=details.map(([label,value])=>`<div><span>${label}</span><b>${escapeMarkup(value)}</b></div>`).join('');
 }
 
 async function runIntegrated(msg){
- const d=await post("/api/integrated",integratedObj());
- lastIntegrated=d;
+ const input=integratedObj(),key=JSON.stringify(input),request=++integratedRequest;
+ setMissionStatus('loading','통합 설계를 계산하고 있습니다.');
+ let d;
+ try{d=await post('/api/integrated',input);}catch(error){if(request===integratedRequest)reportError(error);throw error;}
+ if(request!==integratedRequest||key!==designKey())return null;
+ lastIntegrated=d;lastIntegratedInput=input;lastDesignKey=key;
+ lastCalculatedAt=new Date().toLocaleTimeString('ko-KR');
+ setMissionStatus('ready','현재 입력의 통합 계산 완료. Coverage / Monte Carlo는 각 결과 상태를 확인하세요.');
  renderSat(d.satcom);
  renderBeam(d.beamforming);
  renderPayload(d.payload);
@@ -293,26 +328,17 @@ async function runIntegrated(msg){
  return d;
 }
 
-$("syncBtn").onclick=withLoading($("syncBtn"),async()=>{syncGlobalToLabs();await runIntegrated("Global mission parameters propagated across Semiconductor → Beamforming → RF Payload → Radiation → Service.");await renderOrbit()});
+async function syncAll(){
+ syncGlobalToLabs();
+ const tasks=await Promise.allSettled([runIntegrated('공유 설계값의 통합 계산을 완료했습니다.'),renderOrbit(),runCoverage(),runMonteCarlo(),runTimeline()]);
+ const failure=tasks.find(task=>task.status==='rejected');
+ if(failure)throw failure.reason;
+}
+$('syncBtn').onclick=withLoading($('syncBtn'),syncAll);
 $("s_run").onclick=withLoading($("s_run"),()=>runIntegrated("Semiconductor changes propagated downstream to power, thermal, payload and service metrics."));
 $("b_run").onclick=withLoading($("b_run"),()=>runIntegrated("Beamforming changes propagated to effective beams, payload power and service capacity."));
 $("p_run").onclick=withLoading($("p_run"),()=>runIntegrated("RF payload architecture changes propagated to heat, radiator, mass and integrated mission metrics."));
 $("r_run").onclick=withLoading($("r_run"),()=>runIntegrated("Radiation mitigation changes propagated to availability and effective service capacity."));
-
-const announceGlobal=debounce((id)=>trace(`Global parameter changed: ${id.replace("g_","")} — press SYNC ALL LABS to propagate.`),120);
-["g_alt","g_freq","g_bw","g_elem","g_beams"].forEach(id=>$(id).addEventListener("input",()=>announceGlobal(id)));
-
-// Mission CONOPS redraws instantly from these fields alone (pure client-side geometry),
-// so it doesn't need to wait for a RUN/SYNC click the way the physics panels do.
-const debounceConops=debounce(renderConops,100);
-["g_alt","g_freq","g_bw","g_elem","g_beams","s_el","cv_planes","cv_spp"].forEach(id=>{ if($(id)) $(id).addEventListener("input",debounceConops) });
-if($("p_arch")) $("p_arch").addEventListener("change",renderConops);
-
-syncGlobalToLabs();
-runIntegrated();
-renderOrbit();
-renderConops();
-
 
 function optimizerObj(){
  return {
@@ -370,12 +396,11 @@ $("sen_run").onclick=withLoading($("sen_run"),runSensitivity);
 
 // Persistent scenario snapshot
 function saveScenario(){
- localStorage.setItem("sdtc_v06_scenario",JSON.stringify({
-  global:{alt:$("g_alt").value,freq:$("g_freq").value,bw:$("g_bw").value,elem:$("g_elem").value,beams:$("g_beams").value},
-  sat:satObj(),beam:beamObj(),rad:radObj(),payload:payloadObj()
- }));
+ try{localStorage.setItem('sdtc_v07_fields',JSON.stringify(Object.fromEntries([...document.querySelectorAll('input[id],select[id]')].map(el=>[el.id,el.type==='checkbox'?el.checked:el.value]))));}catch(error){console.warn('Scenario could not be saved',error);}
 }
 function loadScenario(){
+ const fields=localStorage.getItem('sdtc_v07_fields');
+ if(fields){for(const [id,value] of Object.entries(JSON.parse(fields))){const el=$(id);if(el&&el.matches('input,select')){if(el.type==='checkbox')el.checked=value===true;else el.value=value;}}return true;}
  const raw=localStorage.getItem("sdtc_v06_scenario"); if(!raw)return false;
  const s=JSON.parse(raw);
  $("g_alt").value=s.global.alt;$("g_freq").value=s.global.freq;$("g_bw").value=s.global.bw;$("g_elem").value=s.global.elem;$("g_beams").value=s.global.beams;
@@ -386,19 +411,17 @@ function loadScenario(){
  return true;
 }
 window.addEventListener("beforeunload",saveScenario);
-if(loadScenario()){syncGlobalToLabs();runIntegrated("Saved V0.6 scenario restored.");renderOrbit();}
-
 
 function coverageObj(){
  return {
-  altitude_km:num("cv_alt"),inclination_deg:num("cv_inc"),
-  planes:parseInt($("cv_planes").value),sats_per_plane:parseInt($("cv_spp").value),
-  min_elevation_deg:num("cv_el"),target_min_visible:parseInt($("cv_minvis").value),
-  walker_f:parseInt($("cv_f").value),duration_hours:num("cv_hours"),time_step_sec:num("cv_step")
+  ...constellationObj(),target_min_visible:parseInt($("cv_minvis").value),
+  duration_hours:num("cv_hours"),time_step_sec:num("cv_step")
  }
 }
 async function runCoverage(){
- const d=await post("/api/coverage",coverageObj());
+ const input=coverageObj();
+ const d=await post('/api/coverage',input);
+ if(JSON.stringify(input)!==JSON.stringify(coverageObj()))return null;
  $("cv_total").textContent=d.total_sats;
  $("cv_foot").textContent=d.footprint_radius_km+" km";
  $("cv_overlap").textContent=d.mean_global_overlap_proxy+"×";
@@ -420,7 +443,7 @@ async function runCoverage(){
  $("cv_note").textContent=d.note;
  return d;
 }
-$("cv_run").onclick=withLoading($("cv_run"),async()=>{await runCoverage();trace("Constellation geometry propagated to regional service visibility proxies.")});
+$("cv_run").onclick=withLoading($("cv_run"),async()=>{if(await runCoverage())trace("Constellation geometry propagated to regional service visibility proxies.")});
 
 $("cv_sweep").onclick=withLoading($("cv_sweep"),async()=>{
  const rows=await post("/api/coverage-sweep",coverageObj());
@@ -444,7 +467,9 @@ function mcObj(){
  }
 }
 async function runMonteCarlo(){
- const d=await post("/api/montecarlo",mcObj()),m=d.metrics;
+ const input=mcObj();
+ const d=await post('/api/montecarlo',input),m=d.metrics;
+ if(JSON.stringify(input)!==JSON.stringify(mcObj()))return null;
  $("mc_success").textContent=d.success_probability_pct+" %";
  $("mc_cp50").textContent=m.capacity_gbps.p50+" Gbps";
  $("mc_cp10").textContent=m.capacity_gbps.p10+" Gbps";
@@ -479,35 +504,25 @@ async function runMonteCarlo(){
  $("mc_note").textContent=d.note;
  return d;
 }
-$("mc_run").onclick=withLoading($("mc_run"),async()=>{await runMonteCarlo();trace("Monte Carlo uncertainty propagated to mission robustness and success probability.")});
-
-// Keep constellation altitude aligned with global bus by default.
-$("syncBtn").addEventListener("click",()=>{$("cv_alt").value=$("g_alt").value;});
-
-// Initial V0.7 visibility panels
-runCoverage();
-runMonteCarlo();
-
+$("mc_run").onclick=withLoading($("mc_run"),async()=>{if(await runMonteCarlo())trace("Monte Carlo uncertainty propagated to mission robustness and success probability.")});
 
 async function loadTheory(){
  const d=await fetch("/api/theory").then(r=>r.json());
  $("theoryGrid").innerHTML=d.physics_core.map(x=>`<div class="theory-card"><span>${x.status.toUpperCase()}</span><b>${x.area}</b><code>${x.equation}</code></div>`).join("");
  $("engineeringModels").innerHTML=d.engineering_models.map(x=>`<div>${x}</div>`).join("");
 }
-loadTheory();
 
 // V0.8 physical-result visibility
 const oldRenderSatV08 = renderSat;
 renderSat = function(d){
  oldRenderSatV08(d);
- const w = d.warnings || [];
+ const w = [...(d.warnings || [])];
  if(d.link && d.orbit){
    w.unshift(`Physics: orbital period ${d.orbit.period_min} min · orbital speed ${d.orbit.speed_km_s} km/s · max Doppler bound ${d.link.max_doppler_khz} kHz`);
    w.unshift(`Link: Tx aperture gain ${d.antenna.used_tx_gain_dbi} dBi · noise T ${d.link.noise_temp_k} K · spectral efficiency ${d.link.practical_se} bit/s/Hz`);
  }
  warnings("s_warn",w);
 }
-
 
 async function runPoisson(){
  const body={
@@ -542,12 +557,13 @@ async function runPropagation(){
 $("pr_run").onclick=withLoading($("pr_run"),runPropagation);
 
 function timelineObj(){
- return {altitude_km:num("cv_alt"),inclination_deg:num("cv_inc"),planes:parseInt($("cv_planes").value),
- sats_per_plane:parseInt($("cv_spp").value),walker_f:parseInt($("cv_f").value),region:$("tl_region").value,
- min_elevation_deg:num("cv_el"),duration_hours:num("tl_hours"),time_step_sec:num("tl_step")}
+ return {...constellationObj(),region:$("tl_region").value,
+ duration_hours:num("tl_hours"),time_step_sec:num("tl_step")}
 }
 async function runTimeline(){
- const d=await post("/api/pass-timeline",timelineObj()),r=d.rows;
+ const input=timelineObj();
+ const d=await post('/api/pass-timeline',input),r=d.rows;
+ if(JSON.stringify(input)!==JSON.stringify(timelineObj()))return;
  reactChart("tl_chart",[
   {type:"scatter",mode:"lines",name:"Visible sats",x:r.map(x=>x.time_min),y:r.map(x=>x.visible_count),line:{shape:"hv"}},
   {type:"scatter",mode:"lines",name:"Max elevation °",x:r.map(x=>x.time_min),y:r.map(x=>x.max_elevation_deg),yaxis:"y2"},
@@ -558,14 +574,37 @@ async function runTimeline(){
 }
 $("tl_run").onclick=withLoading($("tl_run"),runTimeline);
 
-runPoisson();
-runPropagation();
-runTimeline();
-
 async function loadPhysicsRegistry(){
  const d=await fetch("/api/physics-registry").then(r=>r.json());
  if($("physicsVersion")) $("physicsVersion").textContent=d.core_version;
  if($("physicsCount")) $("physicsCount").textContent=d.count;
  if($("theoryGrid")) $("theoryGrid").innerHTML=d.registry.map(x=>`<div class="theory-card"><span>${x.domain.toUpperCase()} · ${x.level}</span><b>${x.id}</b><code>${x.equation}</code><small>model v${x.version}</small></div>`).join("");
 }
-loadPhysicsRegistry();
+
+// Restore once before any API calls, so startup cannot overwrite a restored design.
+try{loadScenario();}catch(error){console.warn('Saved scenario could not be restored',error);}
+sharedFields.forEach(group=>syncSharedField(group[0]));
+function designChanged(event){
+ const el=event.target;if(!el.matches('input,select'))return;
+ syncSharedField(el.id);
+ if(lastDesignKey!==designKey()){
+  setMissionStatus('stale','입력이 변경되었습니다. 그림은 미리보기이며 기존 계산 결과는 갱신 전입니다. RUN 또는 SYNC를 실행하세요.');
+  $('c_mc').textContent='재계산 필요';
+ }else if(lastIntegrated){
+  setMissionStatus('ready','현재 입력의 통합 계산 결과입니다. Coverage / Monte Carlo는 각 결과 상태를 확인하세요.');
+ }
+ if(el.id.startsWith('cv_')||['g_alt','s_el','p_geo_el'].includes(el.id))$('c_regmin').textContent='재계산 필요';
+ if(el.id.startsWith('mc_'))$('c_mc').textContent='재계산 필요';
+ renderConops();
+}
+document.addEventListener('input',designChanged);
+document.addEventListener('change',designChanged);
+renderConops();
+withLoading($('syncBtn'),syncAll)();
+withLoading($('po_run'),runPoisson)();
+withLoading($('pr_run'),runPropagation)();
+loadTheory().then(loadPhysicsRegistry).catch(reportError);
+const missionBarObserver=new ResizeObserver(entries=>{
+ document.documentElement.style.setProperty('--mission-height',entries[0].target.offsetHeight+'px');
+});
+missionBarObserver.observe(document.querySelector('.mission-bar'));

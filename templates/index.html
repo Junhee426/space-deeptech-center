@@ -15,7 +15,7 @@
     <h1>Physics-Core Space Payload & Constellation Engineering Center</h1>
     <p>반도체 → 디지털 빔포밍 → RF 탑재체 → 방사선 → 위성 링크 → 서비스까지 하나의 시나리오로 연결</p>
   </div>
-  <div class="header-badges"><span>4 LABS</span><span>1 SCENARIO BUS</span><span>LIVE PROPAGATION</span><span>KASA NAVY / RED</span><span>FAST/FULL ENGINE</span></div>
+  <div class="header-badges"><span>10 VIEWS</span><span>1 SCENARIO BUS</span><span>LIVE PROPAGATION</span><span>KASA NAVY / RED</span><span>FAST/FULL ENGINE</span></div>
 </header>
 
 <section class="mission-bar">
@@ -28,6 +28,7 @@
   <button id="syncBtn">SYNC ALL LABS</button>
 </section>
 
+<div id="missionStatus" class="mission-status" role="status" aria-live="polite" data-state="loading">설계를 불러오고 있습니다.</div>
 <div class="shell">
   <aside class="side-nav">
     <button class="nav-item active" data-view="center"><span>00</span><b>Mission Control</b><small>전체 연결성</small></button>
@@ -70,7 +71,10 @@
 
       <div class="panel conops-panel">
         <div class="section-title"><span>MISSION CONOPS</span><b>설계 값에 따라 실시간으로 갱신되는 운용개념도</b></div>
-        <div id="conopsDiagram" class="conops-diagram"></div>
+        <p class="physics-note">고도·군집·빔·탑재체 구조는 입력 즉시 반영됩니다. 위성·태양전지판·방열판 크기는 계산된 질량·탑재체 전력·방열 면적의 상대적 표현입니다.</p>
+        <div id="conopsDiagram" class="conops-diagram" tabindex="0" role="region" aria-label="위성 운용개념도, 작은 화면에서는 좌우로 스크롤하세요"></div>
+        <p class="conops-scroll-hint">그림을 좌우로 밀어 전체 구조를 확인하세요.</p>
+        <div id="conopsDetails" class="conops-details"></div>
         <p id="conopsCaption" class="conops-caption"></p>
       </div>
 
@@ -269,11 +273,11 @@
             <label>Region<select id="p_geo_region"><option selected>Korea</option><option>UAE</option><option>Southeast Asia</option></select></label>
             <label>Time min<input id="p_geo_time" value="0" type="number" step="1"></label>
             <label>User radius km<input id="p_geo_radius" value="250" type="number"></label>
-            <label>Min elev °<input id="p_geo_el" value="10" type="number"></label>
+            <label>Shared min elev °<input id="p_geo_el" value="20" type="number"></label>
             <label>HPBW °<input id="p_geo_hpbw" value="2.5" type="number" step=".1"></label>
             <label>Terminal gain dBi<input id="p_geo_gr" value="32" type="number"></label>
             <label>Atmos loss dB<input id="p_geo_loss" value="1" type="number" step=".2"></label>
-            <label>Total Tx W<input id="p_geo_tx" value="40" type="number"></label>
+            <label>Total Tx W<input id="p_geo_tx" value="20" type="number"></label>
           </div>
           </details>
 
@@ -348,7 +352,7 @@
             <div><span>Best Cost</span><b id="o_bestcost">—</b></div>
             <div><span>Selected Objective</span><b id="o_objlabel">—</b></div>
           </div>
-          <div class="charts"><div class="panel"><div id="o_pareto"></div></div><div class="panel"><div id="o_sensitivity"></div></div></div>
+          <div class="charts"><div class="panel"><div id="o_pareto" class="chart-empty">RUN OPTIMIZER를 실행하면 설계 후보가 표시됩니다.</div></div><div class="panel"><div id="o_sensitivity" class="chart-empty">SENSITIVITY 설정을 열고 RUN SENSITIVITY를 실행하세요.</div></div></div>
           <div class="panel table-panel"><div class="section-title"><span>TOP DESIGN CANDIDATES</span><b>Best 20 feasible combinations</b></div><div class="table-wrap"><table id="o_table"><thead></thead><tbody></tbody></table></div></div>
           <div class="panel report-panel"><div class="section-title"><span>EXECUTIVE SUMMARY</span><b>Report-ready interpretation</b></div><div id="o_summary"></div></div>
         </div>
@@ -362,6 +366,7 @@
         <div class="panel form-card">
           <div class="group-title">CONSTELLATION</div>
           <div class="cols2">
+            <p class="physics-note">고도·최소 고도각·군집 구성은 RF Payload와 운용개념도에 함께 적용됩니다.</p>
             <label>Altitude km<input id="cv_alt" value="1280" type="number"></label>
             <label>Inclination °<input id="cv_inc" value="42" type="number"></label>
             <label>Planes<input id="cv_planes" value="16" type="number"></label>
