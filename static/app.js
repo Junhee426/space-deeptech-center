@@ -360,10 +360,21 @@ function renderOptTable(rows){
  th.innerHTML="<tr>"+keys.map(k=>`<th>${k}</th>`).join("")+"</tr>";
  tb.innerHTML=rows.map(r=>"<tr>"+keys.map(k=>`<td>${r[k]}</td>`).join("")+"</tr>").join("");
 }
+let optimizerRequest=0;
+function optimizerKey(input){return JSON.stringify(input);}
+// The results table, objective label and report summary must all reflect the
+// SAME request-time input snapshot, even if the user edits inputs (or triggers
+// another run) while this request is in flight. `input` is captured once, up
+// front, and used for every render below (never re-read live from the DOM
+// after the fact); `request`/`key` identify this call so a late-arriving
+// response for now-stale inputs is discarded rather than rendered.
 async function runOptimizer(){
- const d=await post("/api/optimize",optimizerObj()), rows=d.results;
+ const input=optimizerObj(), key=optimizerKey(input), request=++optimizerRequest;
+ const d=await post("/api/optimize",input);
+ if(request!==optimizerRequest||key!==optimizerKey(optimizerObj()))return; // a newer run superseded this one
+ const rows=d.results;
  $("o_count").textContent=d.count;
- $("o_objlabel").textContent=$("o_obj").value;
+ $("o_objlabel").textContent=input.objective;
  if(rows.length){
    $("o_bestcap").textContent=Math.max(...rows.map(r=>r.capacity_gbps)).toFixed(2)+" Gbps";
    $("o_bestmass").textContent=Math.min(...rows.map(r=>r.mass_kg)).toFixed(1)+" kg";
@@ -379,7 +390,11 @@ async function runOptimizer(){
    text:rows.map(r=>`${r.material}/${r.processor}<br>${r.altitude_km} km<br>$${r.cost_musd}M`),
    marker:{size:rows.map(r=>8+Math.min(18,r.cost_musd/4))}
  }],{...layout,title:"Capacity vs Mass",xaxis:{title:"Mass kg"},yaxis:{title:"Effective Gbps"}},cfg);
- const rep=await post("/api/report-summary",integratedObj());
+ // Uses input.base (the same snapshot the table/label above were computed
+ // from), not a fresh integratedObj() read, so the summary can never describe
+ // a different scenario than the table it accompanies.
+ const rep=await post("/api/report-summary",input.base);
+ if(request!==optimizerRequest||key!==optimizerKey(optimizerObj()))return; // superseded during the summary request
  $("o_summary").innerHTML=rep.bullets.map(x=>`<div class="summary-item">${x}</div>`).join("");
 }
 $("o_run").onclick=withLoading($("o_run"),runOptimizer);

@@ -67,7 +67,42 @@ const path=require('node:path');
  await page.evaluate(()=>saveScenario());await page.reload();await page.waitForFunction(()=>!document.getElementById('syncBtn').disabled);
  assert.equal(await page.locator('#g_alt').inputValue(),'500');assert.equal(await page.locator('#cv_alt').inputValue(),'500');assert.equal(await page.locator('#cv_inc').inputValue(),'55');assert.equal(await page.locator('#p_stack').inputValue(),'PHY');
  await page.setViewportSize({width:1440,height:1000});await page.evaluate(()=>show('optimizer'));await page.click('#o_run');await page.waitForFunction(()=>!document.getElementById('o_run').disabled,{timeout:60000});assert((await page.locator('#o_summary').textContent()).length>10);
+ // The optimizer table, objective label and report summary must all reflect the
+ // SAME request-time input snapshot, and a response for now-stale inputs must be
+ // discarded entirely (matching runIntegrated's established convention above)
+ // rather than rendered -- whether with its own request-time value or with a
+ // live-DOM value read after the fact.
+ await edit('o_obj','Highest Capacity');await page.evaluate(()=>runOptimizer());
+ const optBaseline=await page.locator('#o_objlabel').textContent();assert.equal(optBaseline,'Highest Capacity');
+ {
+  await edit('o_obj','Balanced');
+  let release;const gate=new Promise(resolve=>release=resolve);let received;const started=new Promise(resolve=>received=resolve);
+  await page.route('**/api/optimize',async route=>{const response=await route.fetch();received();await gate;await route.fulfill({response});});
+  const pending=page.evaluate(()=>runOptimizer());await started; // captures objective=Balanced
+  await edit('o_obj','Lowest Cost'); // live input changes again while the Balanced run is in flight
+  release();await pending;
+  assert.equal(await page.locator('#o_objlabel').textContent(),optBaseline,'a response for now-stale inputs must be discarded, leaving the last valid render untouched');
+  await page.unroute('**/api/optimize');
+ }
+ {
+  // A stale (slower, earlier) response must not clobber a fresher run's results
+  // even if it resolves after the fresher one.
+  let releaseFirst;const gateFirst=new Promise(resolve=>releaseFirst=resolve);
+  let firstReceived;const firstStarted=new Promise(resolve=>firstReceived=resolve);
+  let secondSeen=false;
+  await page.route('**/api/optimize',async route=>{
+   if(!secondSeen){secondSeen=true;firstReceived();await gateFirst;}
+   await route.continue();
+  });
+  const firstRun=page.evaluate(()=>runOptimizer());await firstStarted; // objective=Lowest Cost (current DOM)
+  await edit('o_obj','Highest Capacity');
+  const secondRun=page.evaluate(()=>runOptimizer());await secondRun; // second (newer) request resolves first
+  assert.equal(await page.locator('#o_objlabel').textContent(),'Highest Capacity');
+  releaseFirst();await firstRun; // stale first request resolves after -- must be discarded
+  assert.equal(await page.locator('#o_objlabel').textContent(),'Highest Capacity','a late-arriving stale response must not overwrite the newer run\'s rendered result');
+  await page.unroute('**/api/optimize');
+ }
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({checks:'30 viewport checks, shared geometry, SVG structure and sizing, stale response, API failure, persistence, optimizer',sizes,errors},null,2));
+ console.log(JSON.stringify({checks:'30 viewport checks, shared geometry, SVG structure and sizing, stale response, API failure, persistence, optimizer, optimizer stale-response discard',sizes,errors},null,2));
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1});
