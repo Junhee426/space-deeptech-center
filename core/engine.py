@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from enum import Enum
 from math import log10, log2, sqrt, cos, acos, sin, radians, degrees, pi
 from io import StringIO
 import csv
@@ -8,9 +9,16 @@ from statistics import mean
 import numpy as np
 from functools import lru_cache
 
-from simulation.batch import batched_design_grid, parallel_map, monte_carlo_draws
+from simulation.batch import batched_design_grid, parallel_map, monte_carlo_draws, job_slot, TooManyConcurrentJobsError
 from simulation.workers import optimize_case_worker, monte_carlo_case_worker
-from orbit.walker import walker_positions_times, regional_visibility_times
+from orbit.walker import walker_positions_times, regional_visibility_times, regional_visibility_times_multi, elevation_matrix
+
+# Single source of truth for the reported application version. app.py and
+# api/routes.py both import this instead of hardcoding their own copy, so the
+# FastAPI app metadata, /api/health, /api/architecture and /api/performance
+# can no longer drift out of sync with each other (they previously reported a
+# mix of "0.6.0" and a stale "0.5.0").
+APP_VERSION = "0.6.0"
 
 # Physics core constants (SI unless noted)
 R_EARTH = 6371.0              # mean spherical Earth radius [km]
@@ -290,10 +298,10 @@ def _visible_satellites_np(region, altitude_km, inclination_deg, planes, sats_pe
     # quantize cached state to 1 sec
     t_s=int(round(time_min*60.0))
     sats=np.asarray(_walker_ecef_cached(round(altitude_km,6),round(inclination_deg,6),int(planes),int(sats_per_plane),int(walker_f),t_s),dtype=float)
-    los=sats-ground[None,:]
-    rng=np.linalg.norm(los,axis=1)
-    sinel=(los@zenith)/np.maximum(rng,1e-12)
-    elev=np.degrees(np.arcsin(np.clip(sinel,-1,1)))
+    # Same elevation/range formula as orbit.walker.elevation_matrix (reused here
+    # instead of a second inline copy) and _user_elevation_deg_np (the
+    # per-user-vs-one-satellite direction of the same physics).
+    elev,rng=elevation_matrix(sats,ground,zenith)
     idx=np.where(elev>=min_elev_deg)[0]
     return sats,idx,elev,rng
 
@@ -315,6 +323,24 @@ def _offaxis_angle_deg(sat_xyz, target_xyz, beam_center_xyz):
     dot=np.sum(a*b,axis=-1)/(np.maximum(an*bn,1e-18))
     return np.degrees(np.arccos(np.clip(dot,-1,1)))
 
+def _user_elevation_deg_np(sat_xyz, user_xyz):
+    """
+    Elevation angle(s) at which each user observes a single satellite above its
+    local horizon: the angle between the user->satellite line of sight and the
+    user's local zenith direction. This must be measured along the user->satellite
+    vector (sat_xyz - user_xyz); using the reversed satellite->user vector flips
+    the sign of every result (e.g. a satellite directly overhead would read as
+    -90 deg instead of the correct +90 deg).
+    Returns (elevation_deg, slant_range_km), both shape (n_users,).
+    """
+    sat_xyz=np.asarray(sat_xyz,dtype=float)
+    user_xyz=np.asarray(user_xyz,dtype=float)
+    los=sat_xyz[None,:]-user_xyz
+    ranges=np.linalg.norm(los,axis=1)
+    ground_norm=user_xyz/np.linalg.norm(user_xyz,axis=1)[:,None]
+    elev=np.degrees(np.arcsin(np.clip(np.sum(los*ground_norm,axis=1)/np.maximum(ranges,1e-12),-1,1)))
+    return elev,ranges
+
 def _geometry_channel_matrix(x):
     """
     Builds a complex H[user,beam] from actual Walker satellite geometry,
@@ -333,7 +359,8 @@ def _geometry_channel_matrix(x):
         return {
             "H":np.zeros((len(users),max(1,x.beams)),dtype=complex),
             "users":users,"satellite_indices":[],"user_elevation_deg":[-90.0]*len(users),
-            "user_range_km":[None]*len(users),"beam_centers":users[:max(1,min(x.beams,len(users)))],
+            "user_range_km":[None]*len(users),"user_visible":[False]*len(users),
+            "beam_centers":users[:max(1,min(x.beams,len(users)))],
             "visible":False
         }
 
@@ -341,10 +368,11 @@ def _geometry_channel_matrix(x):
     # Current payload applies one common precoder; use the highest-elevation serving satellite.
     sat=sats[selected[0]]
 
-    los=user_xyz-sat[None,:]
-    ranges=np.linalg.norm(los,axis=1)
-    ground_norm=user_xyz/np.linalg.norm(user_xyz,axis=1)[:,None]
-    elev=np.degrees(np.arcsin(np.clip(np.sum(los*ground_norm,axis=1)/np.maximum(ranges,1e-12),-1,1)))
+    elev,ranges=_user_elevation_deg_np(sat,user_xyz)
+
+    # Per-user visibility mask: a user below the configured minimum elevation cannot
+    # actually see the serving satellite, even when the region anchor point can.
+    user_visible=elev>=float(x.geometry_min_elevation_deg)
 
     # Beam centers follow highest-traffic users later; initial deterministic centers uniformly sample users.
     b=max(1,min(int(x.beams),len(users)))
@@ -365,9 +393,14 @@ def _geometry_channel_matrix(x):
         phase=np.exp(-1j*2*pi*(ranges*1000)/lam)
         H[:,j]=np.sqrt(gt*gr/fixed_loss)*fs_amp*phase
 
+    # A non-visible user must not receive any channel energy derived from a
+    # satellite it cannot actually see, regardless of the off-axis beam math above.
+    H[~user_visible,:]=0.0
+
     return {
         "H":H,"users":users,"satellite_indices":[int(v) for v in selected],
         "user_elevation_deg":elev.tolist(),"user_range_km":ranges.tolist(),
+        "user_visible":user_visible.tolist(),
         "beam_center_indices":center_indices.tolist(),
         "beam_centers":[users[i] for i in center_indices],
         "visible":True
@@ -504,6 +537,12 @@ def _schedule_throughput_physical(H, schedule, beam_assignment, traffic, bandwid
         slot_sinr.append(float(np.mean(sinrs)) if len(sinrs) else -99.0)
 
     user_avg=user_acc/max(1,len(schedule))
+    # A user whose channel row is identically zero (masked out as non-visible, or never
+    # scheduled) must show exactly 0 Mbps. The SINR/log2 chain above floors SINR at a
+    # small positive epsilon to avoid log(0), which otherwise leaves a non-zero but
+    # numerically meaningless residual (~1e-30) instead of a true zero.
+    no_channel=np.all(np.abs(H)**2==0,axis=1)
+    user_avg=np.where(no_channel,0.0,user_avg)
     return {"aggregate_gbps":float(user_avg.sum()/1000),"user_mbps":user_avg.tolist(),
             "slot_mbps":slot_rates,"slot_mean_sinr_db":slot_sinr}
 
@@ -800,14 +839,157 @@ def solve_poisson_1d(x):
         "assumption":"1D uniform net ionized dopant charge; mobile-carrier Poisson-Boltzmann coupling is not included."
     }
 
-class SatcomInput(BaseModel):
-    material:str="GaN"
+class ValidatedModel(BaseModel):
+    """
+    Base for every API input model.
+
+    - Rejects non-finite floats (NaN / Infinity) on any field.
+    - Re-validates on model_copy(update=...): pydantic's model_copy intentionally
+      skips validation even when validate_assignment=True (it does not go through
+      __setattr__ or the constructor), so a value pushed through model_copy could
+      otherwise silently bypass every constraint/enum/cross-field check below. The
+      codebase updates these models almost exclusively via model_copy(update=...)
+      (propagating shared mission parameters between satcom/beam/payload/radiation),
+      so without this override those checks would only ever fire once, at the very
+      first construction of a default-valued model.
+    - validate_assignment=True additionally re-validates plain `model.field = value`
+      assignment, for any code path that mutates a model in place.
+    """
+    # validate_default=True: field defaults given as plain string literals (e.g.
+    # architecture:PayloadArchitecture="Regenerative") are otherwise stored as raw
+    # strings rather than being coerced into their Enum type until something else
+    # touches the field, which shows up as serializer warnings and would let a
+    # default silently skip a field_validator/model_validator.
+    model_config = ConfigDict(validate_assignment=True, validate_default=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _reject_non_finite(cls, v):
+        if isinstance(v, float) and not math.isfinite(v):
+            raise ValueError("must be a finite number; NaN and Infinity are not allowed")
+        return v
+
+    def model_copy(self, *, update=None, deep=False):
+        copied = super().model_copy(update=update, deep=deep)
+        # Re-validate from the raw field values (copied.__dict__), not
+        # copied.model_dump(): model_dump() runs pydantic's serializer over the
+        # not-yet-(re)validated copy, which emits spurious
+        # "Expected `enum` ... input_type=str" warnings whenever `update` supplied
+        # a plain string for an Enum field (which is otherwise perfectly valid
+        # input). Going through model_validate() on the raw values still runs
+        # every field/model validator exactly the same.
+        return type(self).model_validate(dict(copied.__dict__))
+
+
+class Material(str, Enum):
+    SI = "Si"
+    SIGE = "SiGe"
+    GAAS = "GaAs"
+    GAN = "GaN"
+    SIC = "SiC"
+
+class ProcessorType(str, Enum):
+    FPGA = "FPGA"
+    ASIC = "ASIC"
+
+class BeamArchitecture(str, Enum):
+    ANALOG = "Analog"
+    HYBRID = "Hybrid"
+    FULLY_DIGITAL = "Fully Digital"
+
+class PayloadArchitecture(str, Enum):
+    BENT_PIPE = "Bent-Pipe"
+    REGENERATIVE = "Regenerative"
+    FLEXIBLE_DIGITAL = "Flexible Digital"
+
+class Mitigation(str, Enum):
+    NONE = "None"
+    ECC = "ECC"
+    TMR = "TMR"
+    TMR_SCRUB = "TMR+Scrub"
+
+class HpaModel(str, Enum):
+    RAPP = "Rapp"
+
+class PrecodingMethod(str, Enum):
+    RZF = "RZF"
+    MRT = "MRT"
+    ZF = "ZF"
+
+class TrafficPattern(str, Enum):
+    UNIFORM = "Uniform"
+    EDGE_HEAVY = "Edge-heavy"
+    HOTSPOT = "Hotspot"
+
+class SchedulerType(str, Enum):
+    ROUND_ROBIN = "Round Robin"
+    MAX_CI = "Max C/I"
+    PROPORTIONAL_FAIR = "Proportional Fair"
+
+class RegenerativeStack(str, Enum):
+    PHY = "PHY"
+    PHY_MAC = "PHY+MAC"
+    GNB_DU = "gNB-DU"
+    GNB_FULL = "gNB Full"
+
+class Polarization(str, Enum):
+    CIRCULAR = "Circular"
+    VERTICAL = "Vertical"
+    HORIZONTAL = "Horizontal"
+    LINEAR = "Linear"
+
+class PoissonModelType(str, Enum):
+    DEPLETION = "Depletion"
+    POISSON_BOLTZMANN = "Poisson-Boltzmann"
+    NONLINEAR = "Nonlinear"
+
+class OptimizeObjective(str, Enum):
+    BALANCED = "Balanced"
+    LOWEST_COST = "Lowest Cost"
+    HIGHEST_CAPACITY = "Highest Capacity"
+    LOWEST_MASS = "Lowest Mass"
+
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+class SensitivityParameter(str, Enum):
+    RF_OUTPUT_W = "rf_output_w"
+    BANDWIDTH_MHZ = "bandwidth_mhz"
+    BEAMS = "beams"
+    ELEMENTS = "elements"
+    ALTITUDE_KM = "altitude_km"
+    SHIELDING_MM_AL = "shielding_mm_al"
+
+class RegionName(str, Enum):
+    KOREA = "Korea"
+    UAE = "UAE"
+    SOUTHEAST_ASIA = "Southeast Asia"
+
+class AnalysisMode(str, Enum):
+    FULL = "Full"
+    FAST = "Fast"
+
+# Plausible RF band bounds and valid orbital altitude range shared by every model
+# that carries a frequency or altitude field. These are deliberately generous
+# (they must not reject any legitimate satcom/deep-tech scenario) while still
+# catching physically nonsensical input (0 Hz, negative altitude, a "GHz" value
+# that is actually in Hz, an altitude below the Karman line or beyond a
+# reasonable super-GEO/graveyard orbit).
+FREQ_GHZ_MIN=0.1
+FREQ_GHZ_MAX=300.0
+ALTITUDE_KM_MIN=160.0
+ALTITUDE_KM_MAX=40000.0
+
+class SatcomInput(ValidatedModel):
+    material:Material="GaN"
     part_pa:str="PA-GaN-Ka-20W"
     part_lna:str="LNA-GaAs-Ka"
-    altitude_km:float=1280
-    min_elevation_deg:float=20
-    frequency_ghz:float=20
-    bandwidth_mhz:float=100
+    altitude_km:float=Field(1280,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    min_elevation_deg:float=Field(20,ge=0,le=90)
+    frequency_ghz:float=Field(20,gt=0,ge=FREQ_GHZ_MIN,le=FREQ_GHZ_MAX)
+    bandwidth_mhz:float=Field(100,gt=0)
     rf_output_w:float=20
     tx_gain_dbi:float=34
     rx_gain_dbi:float=42
@@ -824,7 +1006,7 @@ class SatcomInput(BaseModel):
     mission_years:float=5
     array_elements:int=256
     beams:int=8
-    processor:str="FPGA"
+    processor:ProcessorType="FPGA"
     processor_tops:float=1.5
     coding_gap_db:float=2.0
     max_spectral_eff:float=6.0
@@ -832,15 +1014,20 @@ class SatcomInput(BaseModel):
     radiator_temp_k:float=323.15
     radiator_emissivity:float=0.85
     radiator_view_factor:float=0.80
+    # Multiplicative perturbation applied on top of the material/part-derived PA
+    # efficiency (see satcom()). Defaults to 1.0 (no perturbation) so every
+    # existing caller is unaffected; Monte Carlo draws this per-run from
+    # MonteCarloInput.pa_eff_sigma_pct.
+    pa_eff_perturbation_mult:float=Field(1.0,gt=0)
 
-class BeamInput(BaseModel):
+class BeamInput(ValidatedModel):
     elements:int=256
     beams:int=8
-    bandwidth_mhz:float=100
+    bandwidth_mhz:float=Field(100,gt=0)
     sample_gsps:float=1.0
     bits:int=12
-    architecture:str="Fully Digital"
-    processor:str="FPGA"
+    architecture:BeamArchitecture="Fully Digital"
+    processor:ProcessorType="FPGA"
     available_tops:float=2.0
     available_power_w:float=180
     phase_bits:int=6
@@ -849,7 +1036,7 @@ class BeamInput(BaseModel):
     element_spacing_lambda:float=.5
     max_scan_deg:float=60.0
 
-class RadInput(BaseModel):
+class RadInput(ValidatedModel):
     mission_years:float=5
     shielding_mm_al:float=2
     tid_env_krad_yr:float=2
@@ -859,15 +1046,15 @@ class RadInput(BaseModel):
     seu_rate_device_day:float=.002
     sel_rate_device_day:float=.00002
     sensitive_devices:int=25
-    mitigation:str="TMR+Scrub"
+    mitigation:Mitigation="TMR+Scrub"
     scrub_interval_min:float=10
     spares:int=1
     reset_recovery_sec:float=5
     service_nodes:int=128
 
-class PayloadInput(BaseModel):
-    architecture:str="Regenerative"
-    frequency_ghz:float=20
+class PayloadInput(ValidatedModel):
+    architecture:PayloadArchitecture="Regenerative"
+    frequency_ghz:float=Field(20,gt=0,ge=FREQ_GHZ_MIN,le=FREQ_GHZ_MAX)
     bandwidth_mhz:float=500
     input_power_dbw:float=-115
     antenna_gain_rx_dbi:float=35
@@ -893,7 +1080,7 @@ class PayloadInput(BaseModel):
     radiator_view_factor:float=0.80
     papr_db:float=8.0
     output_backoff_db:float=3.0
-    hpa_model:str="Rapp"
+    hpa_model:HpaModel="Rapp"
     rapp_p:float=3.0
     dpd_enabled:bool=True
     dpd_gain_db:float=2.0
@@ -905,38 +1092,53 @@ class PayloadInput(BaseModel):
     channelizer_granularity_mhz:float=5.0
     routing_matrix_inputs:int=8
     routing_matrix_outputs:int=8
-    regenerative_stack:str="PHY"
+    regenerative_stack:RegenerativeStack="PHY"
     isl_offload_fraction:float=0.0
     # V1.1 interference / traffic / waveform
     users:int=16
     user_noise_dbm:float=-100.0
     desired_signal_dbm:float=-80.0
     cochannel_coupling_db:float=-18.0
-    precoding_method:str="RZF"
+    precoding_method:PrecodingMethod="RZF"
     rzf_lambda:float=0.1
-    traffic_pattern:str="Hotspot"
-    scheduler:str="Proportional Fair"
+    traffic_pattern:TrafficPattern="Hotspot"
+    scheduler:SchedulerType="Proportional Fair"
     timeslots:int=16
     hpa_samples:int=2048
     modulation_order:int=16
     aclr_guard_fraction:float=0.15
     # V1.2 geometry-resolved channel
     geometry_channel_enabled:bool=True
-    geometry_region:str="Korea"
+    geometry_region:RegionName="Korea"
     geometry_time_min:float=0.0
     geometry_user_radius_km:float=250.0
     geometry_satellite_count:int=1
-    geometry_inclination_deg:float=42.0
-    geometry_planes:int=16
-    geometry_sats_per_plane:int=8
-    geometry_walker_f:int=1
-    geometry_altitude_km:float=1280.0
-    geometry_min_elevation_deg:float=10.0
+    geometry_inclination_deg:float=Field(42.0,ge=0,le=180)
+    geometry_planes:int=Field(16,ge=1,le=60)
+    geometry_sats_per_plane:int=Field(8,ge=1,le=60)
+    geometry_walker_f:int=Field(1,ge=0)
+    geometry_altitude_km:float=Field(1280.0,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    geometry_min_elevation_deg:float=Field(10.0,ge=0,le=90)
     geometry_terminal_gain_dbi:float=32.0
     geometry_beam_hpbw_deg:float=2.5
     geometry_atmospheric_loss_db:float=1.0
     geometry_total_tx_power_w:float=40.0
-    analysis_mode:str="Full"
+    analysis_mode:AnalysisMode="Full"
+
+    @model_validator(mode="after")
+    def _check_walker_phasing_feasible(self):
+        # Walker Delta-pattern phasing convention: F (walker_f) must satisfy
+        # 0 <= F < planes, otherwise the constellation phasing is not well-defined
+        # for the given plane count. The propagation code used to silently wrap
+        # an out-of-range F via `% planes`; that hides a genuinely invalid input
+        # (e.g. F equal to or larger than planes) instead of rejecting it.
+        if self.geometry_walker_f >= self.geometry_planes:
+            raise ValueError(
+                f"geometry_walker_f ({self.geometry_walker_f}) must be less than "
+                f"geometry_planes ({self.geometry_planes}) for a valid Walker "
+                "Delta-pattern phasing (0 <= F < planes)"
+            )
+        return self
 
 
 def satcom(x:SatcomInput):
@@ -944,8 +1146,10 @@ def satcom(x:SatcomInput):
     pa=PARTS.get(x.part_pa,PARTS["PA-GaN-Ka-20W"])
     lna=PARTS.get(x.part_lna,PARTS["LNA-GaAs-Ka"])
 
-    # Semiconductor / PA energy conservation
-    eff=max(0.01,min(0.95,pa.get("eff",mat["pa_eff"])))
+    # Semiconductor / PA energy conservation. pa_eff_perturbation_mult defaults to
+    # 1.0 (no-op) and is only driven away from 1.0 by Monte Carlo sampling
+    # (pa_eff_sigma_pct), so this is a pure pass-through for every other caller.
+    eff=max(0.01,min(0.95,pa.get("eff",mat["pa_eff"])*x.pa_eff_perturbation_mult))
     pa_dc=x.rf_output_w/eff
     pa_heat=max(0.0,pa_dc-x.rf_output_w)
 
@@ -1150,7 +1354,12 @@ def payload(x:PayloadInput):
 
     # Co-channel interference and precoding
     geometry=_geometry_channel_matrix(x) if x.geometry_channel_enabled else None
-    if geometry and geometry["visible"]:
+    if x.geometry_channel_enabled:
+        # geometry["visible"] False means no satellite is visible anywhere in the
+        # region (H is then all-zero, per _geometry_channel_matrix). That must flow
+        # through as genuine zero SINR/throughput below -- it must NOT be replaced by
+        # the synthetic/idealized architecture-level channel model, which would
+        # fabricate a non-zero capacity for a scenario that has no actual link.
         H=np.asarray(geometry["H"],dtype=complex)
         W=_precoder_np(H,x.precoding_method,x.rzf_lambda) if x.precoding_enabled else _precoder_np(H,"MRT",0.0)
         # traffic shares become stream-power weights for physically connected SINR
@@ -1226,8 +1435,11 @@ def payload(x:PayloadInput):
           "users":[{"lat":round(v[0],5),"lon":round(v[1],5)} for v in (geometry["users"] if geometry else [])],
           "user_elevation_deg":[round(v,3) for v in (geometry["user_elevation_deg"] if geometry else [])],
           "user_range_km":[round(v,3) if v is not None else None for v in (geometry["user_range_km"] if geometry else [])],
+          "user_visible":[bool(v) for v in (geometry.get("user_visible",[]) if geometry else [])],
           "beam_centers":[{"lat":round(v[0],5),"lon":round(v[1],5)} for v in (geometry["beam_centers"] if geometry else [])],
-          "channel_source":"Walker geometry + range + phase + Gaussian beam pattern" if geometry and geometry["visible"] else "synthetic fallback"
+          "channel_source":("Walker geometry + range + phase + Gaussian beam pattern" if geometry and geometry["visible"]
+                             else "no visible satellite (zero channel; no synthetic substitute)" if x.geometry_channel_enabled
+                             else "synthetic architecture-level channel model")
       },
       "power":{"pa_dc_w":round(pa_dc,1),"total_w":round(total_power,1),"heat_w":round(heat,1),"radiator_m2":round(radiator,3)},
       "system":{"mass_kg":round(mass,1),"processed_bw_mhz":round(processed_bw,1),"service_index":round(service_index,2),
@@ -1241,45 +1453,61 @@ def payload(x:PayloadInput):
         "Frequency reuse >1 requires explicit co-channel SINR / precoding validation." if x.frequency_reuse>1 else "",
         "Regenerative processing increases onboard compute, software verification and thermal burden." if x.architecture!="Bent-Pipe" else "",
         "Beam-hopping gain is a scheduler abstraction, not a propagation law.",
-        "No visible serving satellite at the selected geometry/time; synthetic channel fallback is used." if x.geometry_channel_enabled and (not geometry or not geometry["visible"]) else "",
+        "No visible serving satellite at the selected geometry/time; channel is zero and throughput is 0 Mbps for every user (no synthetic fallback)." if x.geometry_channel_enabled and (not geometry or not geometry["visible"]) else "",
         "Sampled HPA EVM/ACLR remains a memoryless baseband approximation; no PA memory effects or spectral-mask certification."
       ] if w]
     }
 
-class PropagationInput(BaseModel):
-    frequency_ghz: float = 20.0
-    elevation_deg: float = 30.0
-    rain_rate_mm_h: float = 25.0
-    polarization: str = "Circular"
-    polarization_tilt_deg: float = 45.0
-    rain_height_km: float = 5.0
-    station_height_km: float = 0.1
-    path_reduction_factor: float = 1.0
+class PropagationInput(ValidatedModel):
+    frequency_ghz: float = Field(20.0,gt=0,ge=FREQ_GHZ_MIN,le=FREQ_GHZ_MAX)
+    elevation_deg: float = Field(30.0,ge=0,le=90)
+    rain_rate_mm_h: float = Field(25.0,ge=0)
+    polarization: Polarization = "Circular"
+    polarization_tilt_deg: float = Field(45.0,ge=0,le=180)
+    rain_height_km: float = Field(5.0,ge=0)
+    station_height_km: float = Field(0.1,ge=0)
+    path_reduction_factor: float = Field(1.0,ge=0,le=1)
 
-class PassTimelineInput(BaseModel):
-    altitude_km: float = 1280
-    inclination_deg: float = 42
+class PassTimelineInput(ValidatedModel):
+    altitude_km: float = Field(1280,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    inclination_deg: float = Field(42,ge=0,le=180)
     planes: int = Field(16, ge=1, le=60)
     sats_per_plane: int = Field(8, ge=1, le=60)
-    walker_f: int = 1
-    region: str = "Korea"
-    min_elevation_deg: float = 20
+    walker_f: int = Field(1,ge=0)
+    region: RegionName = "Korea"
+    min_elevation_deg: float = Field(20,ge=0,le=90)
     duration_hours: float = Field(6, ge=0.01, le=72)
     time_step_sec: float = Field(60, ge=5, le=3600)
 
-class PoissonDeviceInput(BaseModel):
-    thickness_um: float = 1.0
+    @model_validator(mode="after")
+    def _check_walker_phasing_feasible(self):
+        if self.walker_f >= self.planes:
+            raise ValueError(
+                f"walker_f ({self.walker_f}) must be less than planes ({self.planes}) "
+                "for a valid Walker Delta-pattern phasing (0 <= F < planes)"
+            )
+        return self
+
+class PoissonDeviceInput(ValidatedModel):
+    thickness_um: float = Field(1.0,gt=0)
     net_doping_cm3: float = 1e15
-    relative_permittivity: float = 11.7
+    relative_permittivity: float = Field(11.7,gt=0)
     left_potential_v: float = 0.0
     right_potential_v: float = 0.5
-    grid_points: int = 121
-    model: str = "Depletion"
-    temperature_k: float = 300.0
-    intrinsic_cm3: float = 1.0e10
-    carrier_sign: int = 1
-    max_iterations: int = 80
-    tolerance_v: float = 1e-7
+    grid_points: int = Field(121,ge=3,le=100000)
+    model: PoissonModelType = "Depletion"
+    temperature_k: float = Field(300.0,gt=0)
+    intrinsic_cm3: float = Field(1.0e10,gt=0)
+    carrier_sign: int = Field(1,ge=-1,le=1)
+    max_iterations: int = Field(80,ge=1,le=100000)
+    tolerance_v: float = Field(1e-7,gt=0)
+
+    @field_validator("carrier_sign")
+    @classmethod
+    def _carrier_sign_nonzero(cls, v):
+        if v == 0:
+            raise ValueError("carrier_sign must be -1 or 1 (0 is not a valid carrier sign)")
+        return v
 
 def api_satcom(x:SatcomInput): return satcom(x)
 
@@ -1308,7 +1536,7 @@ def mat_sweep(x:SatcomInput):
 
 
 
-class IntegratedInput(BaseModel):
+class IntegratedInput(ValidatedModel):
     satcom: SatcomInput = SatcomInput()
     beam: BeamInput = BeamInput()
     radiation: RadInput = RadInput()
@@ -1346,8 +1574,14 @@ def api_integrated(x: IntegratedInput):
     r = radiation(x.radiation)
 
     # 5) Integrated proxies
-    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps",0.0)
-    deterministic_cap = payload_cap if payload_cap > 0 else s["link"]["aggregate_gbps"]
+    # payload() always computes aggregate_scheduled_gbps -- including a genuine 0.0
+    # when geometry_channel_enabled is true but no satellite is visible to any user
+    # (see payload()'s geometry branch). Treating that computed 0 as "missing" and
+    # silently substituting the idealized satcom-link estimate would hide a real
+    # zero-capacity result behind a synthetic positive number. Only fall back when
+    # the value is truly absent (None), never when it is a legitimate 0.
+    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps")
+    deterministic_cap = payload_cap if payload_cap is not None else s["link"]["aggregate_gbps"]
     effective_capacity_gbps = deterministic_cap * (r["service"]["electronics_availability_pct"] / 100.0)
     payload_power_combined = max(s["payload"]["power_w"], p["power"]["total_w"])
     payload_mass_combined = max(s["payload"]["mass_kg"], p["system"]["mass_kg"])
@@ -1414,23 +1648,29 @@ def api_integrated(x: IntegratedInput):
 
 
 
-class OptimizeInput(BaseModel):
+class OptimizeInput(ValidatedModel):
     base: IntegratedInput = IntegratedInput()
-    max_total_mass_kg: float = 500
-    max_payload_power_w: float = 1200
-    min_effective_capacity_gbps: float = 2.0
-    min_effective_beams: int = 4
-    min_availability_pct: float = 99.9
-    max_cost_musd: float = 100
-    allowed_risk: str = "MEDIUM"
-    objective: str = "Balanced"
+    max_total_mass_kg: float = Field(500,gt=0)
+    max_payload_power_w: float = Field(1200,gt=0)
+    min_effective_capacity_gbps: float = Field(2.0,ge=0)
+    min_effective_beams: int = Field(4,ge=0)
+    min_availability_pct: float = Field(99.9,ge=0,le=100)
+    max_cost_musd: float = Field(100,gt=0)
+    allowed_risk: RiskLevel = "MEDIUM"
+    objective: OptimizeObjective = "Balanced"
 
-class SensitivityInput(BaseModel):
+class SensitivityInput(ValidatedModel):
     base: IntegratedInput = IntegratedInput()
-    parameter: str = "rf_output_w"
+    parameter: SensitivityParameter = "rf_output_w"
     low: float = 10
     high: float = 40
-    steps: int = 7
+    steps: int = Field(7,ge=3,le=25)
+
+    @model_validator(mode="after")
+    def _check_range_order(self):
+        if not (self.low < self.high):
+            raise ValueError(f"low ({self.low}) must be less than high ({self.high})")
+        return self
 
 def integrated_calc(x: IntegratedInput):
     s = satcom(x.satcom)
@@ -1456,8 +1696,10 @@ def integrated_calc(x: IntegratedInput):
     p = payload(payload_in)
     r = radiation(x.radiation)
 
-    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps",0.0)
-    deterministic_cap = payload_cap if payload_cap > 0 else s["link"]["aggregate_gbps"]
+    # See api_integrated()'s matching comment: a computed 0 (e.g. no visible
+    # satellite) must never be silently replaced by the idealized link fallback.
+    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps")
+    deterministic_cap = payload_cap if payload_cap is not None else s["link"]["aggregate_gbps"]
     eff_cap = deterministic_cap * (r["service"]["electronics_availability_pct"]/100)
     payload_power = max(s["payload"]["power_w"], p["power"]["total_w"])
     payload_mass = max(s["payload"]["mass_kg"], p["system"]["mass_kg"])
@@ -1490,7 +1732,8 @@ def api_optimize(x: OptimizeInput):
     candidates=batched_design_grid(materials,processors,altitudes,beams_list,rf_outputs,elements_list,bw_list)
     base_dump=x.base.model_dump()
     work=[{"base":base_dump,"candidate":c} for c in candidates]
-    evaluated=parallel_map(optimize_case_worker,work,chunksize=24)
+    with job_slot():
+        evaluated=parallel_map(optimize_case_worker,work,chunksize=24)
 
     rows=[]
     for i in evaluated:
@@ -1525,7 +1768,11 @@ def api_optimize(x: OptimizeInput):
             "availability_pct":i["availability_pct"],"risk":i["risk_class"]
         })
     rows=sorted(rows,key=lambda z:z["score"])[:20]
-    return {"count":len(rows),"evaluated":len(candidates),"parallel":True,"results":rows}
+    return {"count":len(rows),"evaluated":len(candidates),"parallel":True,"results":rows,
+        "note":"Batch evaluation uses Fast screening (no full waveform sampling, no per-user "
+               "geometry/visibility masking) across the full design grid for performance. "
+               "Re-run a shortlisted design through /api/integrated with "
+               "geometry_channel_enabled=true for a full mission-geometry-aware result."}
 
 def api_sensitivity(x: SensitivityInput):
     steps=max(3,min(25,x.steps))
@@ -1556,7 +1803,11 @@ def api_sensitivity(x: SensitivityInput):
         case=IntegratedInput(satcom=sat,beam=beam,radiation=rad,payload=payload_in)
         r=integrated_calc(case)["integrated"]
         rows.append({"x":round(v,4),**r})
-    return {"parameter":x.parameter,"rows":rows}
+    return {"parameter":x.parameter,"rows":rows,
+        "note":"Sensitivity sweep uses Fast screening (no full waveform sampling, no per-user "
+               "geometry/visibility masking) across every step for performance. Re-run a step "
+               "of interest through /api/integrated with geometry_channel_enabled=true for a "
+               "full mission-geometry-aware result."}
 
 def api_report_summary(x: IntegratedInput):
     r=integrated_calc(x)
@@ -1584,60 +1835,53 @@ REGIONS = {
     "Southeast Asia": {"lat_deg": 10.0, "lon_deg": 106.8, "label": "Southeast Asia"},
 }
 
-class CoverageInput(BaseModel):
-    altitude_km: float = 1280
-    inclination_deg: float = 42
+class CoverageInput(ValidatedModel):
+    altitude_km: float = Field(1280,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    inclination_deg: float = Field(42,ge=0,le=180)
     planes: int = Field(16, ge=1, le=60)
     sats_per_plane: int = Field(8, ge=1, le=60)
-    min_elevation_deg: float = 20
-    target_min_visible: int = 1
-    walker_f: int = 1
+    min_elevation_deg: float = Field(20,ge=0,le=90)
+    target_min_visible: int = Field(1,ge=1)
+    walker_f: int = Field(1,ge=0)
     duration_hours: float = Field(24, ge=0.01, le=168)
     time_step_sec: float = Field(120, ge=5, le=3600)
 
-class MonteCarloInput(BaseModel):
+    @model_validator(mode="after")
+    def _check_walker_phasing_feasible(self):
+        if self.walker_f >= self.planes:
+            raise ValueError(
+                f"walker_f ({self.walker_f}) must be less than planes ({self.planes}) "
+                "for a valid Walker Delta-pattern phasing (0 <= F < planes)"
+            )
+        return self
+
+class MonteCarloInput(ValidatedModel):
     base: IntegratedInput = IntegratedInput()
     runs: int = Field(500, ge=1, le=5000)
     seed: int = 42
-    rf_output_sigma_pct: float = 5
-    pa_eff_sigma_pct: float = 6
-    loss_sigma_db: float = 0.8
-    bandwidth_sigma_pct: float = 5
-    processor_tops_sigma_pct: float = 8
-    tid_sigma_pct: float = 20
-    seu_sigma_pct: float = 25
-    mass_sigma_pct: float = 4
-    cost_sigma_pct: float = 8
-    capacity_threshold_gbps: float = 2.0
-    max_power_w: float = 1200
-    max_mass_kg: float = 500
+    rf_output_sigma_pct: float = Field(5,ge=0)
+    pa_eff_sigma_pct: float = Field(6,ge=0)
+    loss_sigma_db: float = Field(0.8,ge=0)
+    bandwidth_sigma_pct: float = Field(5,ge=0)
+    processor_tops_sigma_pct: float = Field(8,ge=0)
+    tid_sigma_pct: float = Field(20,ge=0)
+    seu_sigma_pct: float = Field(25,ge=0)
+    mass_sigma_pct: float = Field(4,ge=0)
+    cost_sigma_pct: float = Field(8,ge=0)
+    capacity_threshold_gbps: float = Field(2.0,ge=0)
+    max_power_w: float = Field(1200,gt=0)
+    max_mass_kg: float = Field(500,gt=0)
 
 def _walker_satellite_positions_ecef(x: CoverageInput, t_s: float):
-    a=R_EARTH+x.altitude_km
-    inc=radians(x.inclination_deg)
-    n=sqrt(MU_EARTH/a**3)
-    theta_e=OMEGA_EARTH*t_s
-    total=max(1,x.planes*x.sats_per_plane)
-    f=x.walker_f % max(1,x.planes)
-    out=[]
-    for p in range(x.planes):
-        raan=2*pi*p/x.planes
-        for s in range(x.sats_per_plane):
-            u0=2*pi*(s/x.sats_per_plane + f*p/total)
-            u=u0+n*t_s
-            cu,su=cos(u),sin(u)
-            cO,sO=cos(raan),sin(raan)
-            ci,si=cos(inc),sin(inc)
-            # ECI for circular orbit: R3(Ω)R1(i)[a cos u, a sin u, 0]
-            xeci=a*(cO*cu-sO*su*ci)
-            yeci=a*(sO*cu+cO*su*ci)
-            zeci=a*(su*si)
-            # ECI -> ECEF through Earth rotation
-            ct,st=cos(theta_e),sin(theta_e)
-            xe=ct*xeci+st*yeci
-            ye=-st*xeci+ct*yeci
-            out.append((xe,ye,zeci))
-    return out
+    """
+    Single-time-step Walker ECEF positions. Delegates to orbit.walker's
+    vectorized propagation (verified bit-for-bit identical to the pure-Python
+    per-satellite loop this used to duplicate) instead of re-implementing the
+    same RAAN / inclination / mean-motion / Earth-rotation formula a second time.
+    """
+    return walker_positions_times(
+        x.altitude_km,x.inclination_deg,x.planes,x.sats_per_plane,x.walker_f,np.array([float(t_s)])
+    )[0]
 
 def _ground_ecef(lat_deg: float, lon_deg: float):
     lat,lon=radians(lat_deg),radians(lon_deg)
@@ -1652,38 +1896,59 @@ def _elevation_deg(sat, ground, zenith):
     sinel=(dx*zenith[0]+dy*zenith[1]+dz*zenith[2])/rng
     return degrees(math.asin(max(-1.0,min(1.0,sinel))))
 
-def _longest_outage_sec(ok_series, step_s):
-    if not ok_series:return 0.0
-    longest=cur=0
-    for ok in ok_series:
-        if ok: cur=0
-        else:
-            cur+=1
-            longest=max(longest,cur)
-    return longest*step_s
+
+def _longest_outage_duration_s(times, ok):
+    """
+    Longest outage duration (seconds), as the elapsed time between the first and
+    last bad (not-ok) sample of the longest run of consecutive bad samples, using
+    the actual sample times rather than assuming a fixed step width.
+
+    A run of N consecutive bad samples spans original-array indices
+    [start, start+N-1]; its elapsed duration is times[start+N-1] - times[start].
+    Multiplying the sample *count* N by the nominal step instead (the previous
+    approach) credits one extra full step-width beyond the last observed-bad
+    instant, over-reporting every outage by one step.
+    """
+    times=np.asarray(times,dtype=float)
+    ok=np.asarray(ok,dtype=bool)
+    if times.size==0:
+        return 0.0
+    bad=(~ok).astype(int)
+    padded=np.r_[0,bad,0]
+    starts=np.where(np.diff(padded)==1)[0]
+    ends=np.where(np.diff(padded)==-1)[0]
+    if len(starts)==0:
+        return 0.0
+    # `ends` (from the padded array) is one past the last bad index in the
+    # original array, so times[ends-1] is the last bad sample's actual time.
+    return float((times[ends-1]-times[starts]).max())
 
 def _coverage_proxy(x: CoverageInput):
     total=max(1,x.planes*x.sats_per_plane)
     period=orbital_period_s(x.altitude_km)
     psi_deg,foot_r,foot_a=footprint(x.altitude_km,x.min_elevation_deg)
     step=max(20.0,min(1800.0,x.time_step_sec))
-    duration=max(step,min(7*24*3600.0,x.duration_hours*3600.0))
-    times=np.arange(0,duration+0.5*step,step)
+    # Respect the requested analysis window exactly. Forcing duration up to at
+    # least `step` (the previous `max(step, ...)`) silently extended the analyzed
+    # period past what was asked whenever the time step exceeded the requested
+    # duration_hours. The window end is now always the requested duration itself.
+    requested_duration=max(0.0,min(7*24*3600.0,x.duration_hours*3600.0))
+    n_samples=max(2,int(np.floor(requested_duration/step))+1)
+    times=np.linspace(0,requested_duration,n_samples)
+    # One streaming pass over time computes every region's visibility from the
+    # same propagated satellite positions, instead of re-running the full Walker
+    # propagation once per region (regional_visibility_times() in a loop).
+    all_visibility=regional_visibility_times_multi(
+        x.altitude_km,x.inclination_deg,x.planes,x.sats_per_plane,x.walker_f,
+        times,x.min_elevation_deg,list(REGIONS.keys())
+    )
     rows=[]
     for key,reg in REGIONS.items():
-        v=regional_visibility_times(
-            x.altitude_km,x.inclination_deg,x.planes,x.sats_per_plane,x.walker_f,
-            times,x.min_elevation_deg,key
-        )
+        v=all_visibility[key]
         counts=np.asarray(v["counts"])
         ok=counts>=x.target_min_visible
         avail=100*ok.mean()
-        # longest outage vectorized via run boundaries
-        bad=(~ok).astype(int)
-        padded=np.r_[0,bad,0]
-        starts=np.where(np.diff(padded)==1)[0]
-        ends=np.where(np.diff(padded)==-1)[0]
-        longest=(ends-starts).max()*step if len(starts) else 0.0
+        longest=_longest_outage_duration_s(times,ok)
         rows.append({
             "region":key,"latitude_deg":reg["lat_deg"],"longitude_deg":reg["lon_deg"],
             "availability_pct":round(float(avail),3),"continuity_pct":round(float(avail),3),
@@ -1701,7 +1966,8 @@ def _coverage_proxy(x: CoverageInput):
     }
 
 def api_coverage(x: CoverageInput):
-    return _coverage_proxy(x)
+    with job_slot():
+        return _coverage_proxy(x)
 
 def api_montecarlo(x: MonteCarloInput):
     runs=max(100,min(5000,x.runs))
@@ -1715,6 +1981,13 @@ def api_montecarlo(x: MonteCarloInput):
     loss=np.maximum(0,rng.normal(x.base.satcom.losses_db,x.loss_sigma_db,runs))
     mf=np.maximum(.1,rng.normal(1.0,x.mass_sigma_pct/100,runs))
     cf=np.maximum(.1,rng.normal(1.0,x.cost_sigma_pct/100,runs))
+    # PA efficiency perturbation: a multiplicative factor around 1.0 (neutral).
+    # sigma=0 makes rng.normal(1.0, 0, runs) return exactly 1.0 for every run, so
+    # this is bit-for-bit identical to the pre-existing (unperturbed) baseline
+    # when pa_eff_sigma_pct=0. It flows into satcom()'s PA efficiency, which
+    # drives pa_dc_w, heat_w and (via the radiator sizing and payload mass roll-up
+    # in satcom()/payload()) mass_kg for every downstream consumer of this draw.
+    pa_eff_mult=np.maximum(.05,rng.normal(1.0,x.pa_eff_sigma_pct/100,runs))
 
     base_dump=x.base.model_dump()
     work=[]
@@ -1723,9 +1996,11 @@ def api_montecarlo(x: MonteCarloInput):
             "rf":max(.1,float(draws["rf"][i])),"bw":max(1.0,float(draws["bw"][i])),
             "tops":max(.05,float(draws["tops"][i])),"tid":max(0.0,float(draws["tid"][i])),
             "seu":max(0.0,float(draws["seu"][i])),"loss":float(loss[i]),
-            "mass_factor":float(mf[i]),"cost_factor":float(cf[i])
+            "mass_factor":float(mf[i]),"cost_factor":float(cf[i]),
+            "pa_eff_mult":float(pa_eff_mult[i])
         }})
-    rows=parallel_map(monte_carlo_case_worker,work,chunksize=max(8,runs//64))
+    with job_slot():
+        rows=parallel_map(monte_carlo_case_worker,work,chunksize=max(8,runs//64))
     for r in rows:
         r["success"]=(r["capacity_gbps"]>=x.capacity_threshold_gbps and r["power_w"]<=x.max_power_w and r["mass_kg"]<=x.max_mass_kg)
 
@@ -1744,16 +2019,17 @@ def api_montecarlo(x: MonteCarloInput):
 
 def api_coverage_sweep(x: CoverageInput):
     out=[]
-    for planes in [4,8,12,16,20]:
-        for spp in [4,8,12,16]:
-            r=_coverage_proxy(x.model_copy(update={"planes":planes,"sats_per_plane":spp,"duration_hours":8,"time_step_sec":900}))
-            avg=sum(z["availability_pct"] for z in r["regions"])/len(r["regions"])
-            min_av=min(z["availability_pct"] for z in r["regions"])
-            out.append({
-                "planes":planes,"sats_per_plane":spp,"total_sats":planes*spp,
-                "avg_region_availability_pct":round(avg,2),
-                "min_region_availability_pct":round(min_av,2),
-            })
+    with job_slot():
+        for planes in [4,8,12,16,20]:
+            for spp in [4,8,12,16]:
+                r=_coverage_proxy(x.model_copy(update={"planes":planes,"sats_per_plane":spp,"duration_hours":8,"time_step_sec":900}))
+                avg=sum(z["availability_pct"] for z in r["regions"])/len(r["regions"])
+                min_av=min(z["availability_pct"] for z in r["regions"])
+                out.append({
+                    "planes":planes,"sats_per_plane":spp,"total_sats":planes*spp,
+                    "avg_region_availability_pct":round(avg,2),
+                    "min_region_availability_pct":round(min_av,2),
+                })
     return out
 
 
@@ -1809,11 +2085,15 @@ def api_pass_timeline(x: PassTimelineInput):
     )
     g,z=_ground_ecef(reg["lat_deg"],reg["lon_deg"])
     step=max(10.0,min(900.0,x.time_step_sec))
-    duration=max(step,min(48*3600.0,x.duration_hours*3600.0))
-    steps=max(2,int(duration/step)+1)
+    # Respect the requested analysis window exactly -- do not extend it to fit a
+    # whole number of steps when the step is larger than the requested duration
+    # (see _coverage_proxy for the matching fix and rationale).
+    requested_duration=max(0.0,min(48*3600.0,x.duration_hours*3600.0))
+    n_samples=max(2,int(np.floor(requested_duration/step))+1)
+    times=np.linspace(0,requested_duration,n_samples)
     rows=[]
-    for j in range(steps):
-        t=j*step
+    for t in times:
+        t=float(t)
         sats=_walker_satellite_positions_ecef(cov,t)
         sats2=_walker_satellite_positions_ecef(cov,t+1.0)
         visible=[]
@@ -1872,7 +2152,7 @@ def api_physics_registry():
 
 def api_performance():
     return {
-        "version":"0.5.0",
+        "version":APP_VERSION,
         "caches":{
             "walker":_walker_ecef_cached.cache_info()._asdict(),
             "slant":_cached_slant_range.cache_info()._asdict(),
@@ -1883,10 +2163,8 @@ def api_performance():
         },
         "modes":{
             "interactive_payload":"Full",
-            "optimizer":"Fast + geometry fallback disabled",
-            "monte_carlo":"Fast + geometry fallback disabled",
-            "sensitivity":"Fast + geometry fallback disabled"
+            "optimizer":"Fast (no per-user geometry/visibility masking)",
+            "monte_carlo":"Fast (no per-user geometry/visibility masking)",
+            "sensitivity":"Fast (no per-user geometry/visibility masking)"
         }
     }
-
-def health(): return {"status":"ok","version":"0.5.0","labs":9}

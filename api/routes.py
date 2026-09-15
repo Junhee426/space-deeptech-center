@@ -68,7 +68,7 @@ def performance(): return engine.api_performance()
 @router.get("/architecture")
 def architecture():
     return {
-      "version":"0.6.0",
+      "version":engine.APP_VERSION,
       "bootstrap":"app.py",
       "engine":"core/engine.py",
       "api":"api/routes.py",
@@ -79,4 +79,4 @@ def architecture():
 
 @router.get("/health")
 def health():
-    return {"status":"ok","version":"0.6.0","labs":9,"physics_models":len(engine.PHYSICS_REGISTRY)}
+    return {"status":"ok","version":engine.APP_VERSION,"labs":9,"physics_models":len(engine.PHYSICS_REGISTRY)}
