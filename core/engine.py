@@ -1007,6 +1007,11 @@ class SatcomInput(ValidatedModel):
     radiator_temp_k:float=323.15
     radiator_emissivity:float=0.85
     radiator_view_factor:float=0.80
+    # Multiplicative perturbation applied on top of the material/part-derived PA
+    # efficiency (see satcom()). Defaults to 1.0 (no perturbation) so every
+    # existing caller is unaffected; Monte Carlo draws this per-run from
+    # MonteCarloInput.pa_eff_sigma_pct.
+    pa_eff_perturbation_mult:float=Field(1.0,gt=0)
 
 class BeamInput(ValidatedModel):
     elements:int=256
@@ -1134,8 +1139,10 @@ def satcom(x:SatcomInput):
     pa=PARTS.get(x.part_pa,PARTS["PA-GaN-Ka-20W"])
     lna=PARTS.get(x.part_lna,PARTS["LNA-GaAs-Ka"])
 
-    # Semiconductor / PA energy conservation
-    eff=max(0.01,min(0.95,pa.get("eff",mat["pa_eff"])))
+    # Semiconductor / PA energy conservation. pa_eff_perturbation_mult defaults to
+    # 1.0 (no-op) and is only driven away from 1.0 by Monte Carlo sampling
+    # (pa_eff_sigma_pct), so this is a pure pass-through for every other caller.
+    eff=max(0.01,min(0.95,pa.get("eff",mat["pa_eff"])*x.pa_eff_perturbation_mult))
     pa_dc=x.rf_output_w/eff
     pa_heat=max(0.0,pa_dc-x.rf_output_w)
 
@@ -1753,7 +1760,11 @@ def api_optimize(x: OptimizeInput):
             "availability_pct":i["availability_pct"],"risk":i["risk_class"]
         })
     rows=sorted(rows,key=lambda z:z["score"])[:20]
-    return {"count":len(rows),"evaluated":len(candidates),"parallel":True,"results":rows}
+    return {"count":len(rows),"evaluated":len(candidates),"parallel":True,"results":rows,
+        "note":"Batch evaluation uses Fast screening (no full waveform sampling, no per-user "
+               "geometry/visibility masking) across the full design grid for performance. "
+               "Re-run a shortlisted design through /api/integrated with "
+               "geometry_channel_enabled=true for a full mission-geometry-aware result."}
 
 def api_sensitivity(x: SensitivityInput):
     steps=max(3,min(25,x.steps))
@@ -1784,7 +1795,11 @@ def api_sensitivity(x: SensitivityInput):
         case=IntegratedInput(satcom=sat,beam=beam,radiation=rad,payload=payload_in)
         r=integrated_calc(case)["integrated"]
         rows.append({"x":round(v,4),**r})
-    return {"parameter":x.parameter,"rows":rows}
+    return {"parameter":x.parameter,"rows":rows,
+        "note":"Sensitivity sweep uses Fast screening (no full waveform sampling, no per-user "
+               "geometry/visibility masking) across every step for performance. Re-run a step "
+               "of interest through /api/integrated with geometry_channel_enabled=true for a "
+               "full mission-geometry-aware result."}
 
 def api_report_summary(x: IntegratedInput):
     r=integrated_calc(x)
@@ -1978,6 +1993,13 @@ def api_montecarlo(x: MonteCarloInput):
     loss=np.maximum(0,rng.normal(x.base.satcom.losses_db,x.loss_sigma_db,runs))
     mf=np.maximum(.1,rng.normal(1.0,x.mass_sigma_pct/100,runs))
     cf=np.maximum(.1,rng.normal(1.0,x.cost_sigma_pct/100,runs))
+    # PA efficiency perturbation: a multiplicative factor around 1.0 (neutral).
+    # sigma=0 makes rng.normal(1.0, 0, runs) return exactly 1.0 for every run, so
+    # this is bit-for-bit identical to the pre-existing (unperturbed) baseline
+    # when pa_eff_sigma_pct=0. It flows into satcom()'s PA efficiency, which
+    # drives pa_dc_w, heat_w and (via the radiator sizing and payload mass roll-up
+    # in satcom()/payload()) mass_kg for every downstream consumer of this draw.
+    pa_eff_mult=np.maximum(.05,rng.normal(1.0,x.pa_eff_sigma_pct/100,runs))
 
     base_dump=x.base.model_dump()
     work=[]
@@ -1986,7 +2008,8 @@ def api_montecarlo(x: MonteCarloInput):
             "rf":max(.1,float(draws["rf"][i])),"bw":max(1.0,float(draws["bw"][i])),
             "tops":max(.05,float(draws["tops"][i])),"tid":max(0.0,float(draws["tid"][i])),
             "seu":max(0.0,float(draws["seu"][i])),"loss":float(loss[i]),
-            "mass_factor":float(mf[i]),"cost_factor":float(cf[i])
+            "mass_factor":float(mf[i]),"cost_factor":float(cf[i]),
+            "pa_eff_mult":float(pa_eff_mult[i])
         }})
     rows=parallel_map(monte_carlo_case_worker,work,chunksize=max(8,runs//64))
     for r in rows:
