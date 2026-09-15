@@ -9,9 +9,9 @@ from statistics import mean
 import numpy as np
 from functools import lru_cache
 
-from simulation.batch import batched_design_grid, parallel_map, monte_carlo_draws
+from simulation.batch import batched_design_grid, parallel_map, monte_carlo_draws, job_slot, TooManyConcurrentJobsError
 from simulation.workers import optimize_case_worker, monte_carlo_case_worker
-from orbit.walker import walker_positions_times, regional_visibility_times
+from orbit.walker import walker_positions_times, regional_visibility_times, regional_visibility_times_multi
 
 # Physics core constants (SI unless noted)
 R_EARTH = 6371.0              # mean spherical Earth radius [km]
@@ -1725,7 +1725,8 @@ def api_optimize(x: OptimizeInput):
     candidates=batched_design_grid(materials,processors,altitudes,beams_list,rf_outputs,elements_list,bw_list)
     base_dump=x.base.model_dump()
     work=[{"base":base_dump,"candidate":c} for c in candidates]
-    evaluated=parallel_map(optimize_case_worker,work,chunksize=24)
+    with job_slot():
+        evaluated=parallel_map(optimize_case_worker,work,chunksize=24)
 
     rows=[]
     for i in evaluated:
@@ -1952,12 +1953,16 @@ def _coverage_proxy(x: CoverageInput):
     requested_duration=max(0.0,min(7*24*3600.0,x.duration_hours*3600.0))
     n_samples=max(2,int(np.floor(requested_duration/step))+1)
     times=np.linspace(0,requested_duration,n_samples)
+    # One streaming pass over time computes every region's visibility from the
+    # same propagated satellite positions, instead of re-running the full Walker
+    # propagation once per region (regional_visibility_times() in a loop).
+    all_visibility=regional_visibility_times_multi(
+        x.altitude_km,x.inclination_deg,x.planes,x.sats_per_plane,x.walker_f,
+        times,x.min_elevation_deg,list(REGIONS.keys())
+    )
     rows=[]
     for key,reg in REGIONS.items():
-        v=regional_visibility_times(
-            x.altitude_km,x.inclination_deg,x.planes,x.sats_per_plane,x.walker_f,
-            times,x.min_elevation_deg,key
-        )
+        v=all_visibility[key]
         counts=np.asarray(v["counts"])
         ok=counts>=x.target_min_visible
         avail=100*ok.mean()
@@ -1979,7 +1984,8 @@ def _coverage_proxy(x: CoverageInput):
     }
 
 def api_coverage(x: CoverageInput):
-    return _coverage_proxy(x)
+    with job_slot():
+        return _coverage_proxy(x)
 
 def api_montecarlo(x: MonteCarloInput):
     runs=max(100,min(5000,x.runs))
@@ -2011,7 +2017,8 @@ def api_montecarlo(x: MonteCarloInput):
             "mass_factor":float(mf[i]),"cost_factor":float(cf[i]),
             "pa_eff_mult":float(pa_eff_mult[i])
         }})
-    rows=parallel_map(monte_carlo_case_worker,work,chunksize=max(8,runs//64))
+    with job_slot():
+        rows=parallel_map(monte_carlo_case_worker,work,chunksize=max(8,runs//64))
     for r in rows:
         r["success"]=(r["capacity_gbps"]>=x.capacity_threshold_gbps and r["power_w"]<=x.max_power_w and r["mass_kg"]<=x.max_mass_kg)
 
@@ -2030,16 +2037,17 @@ def api_montecarlo(x: MonteCarloInput):
 
 def api_coverage_sweep(x: CoverageInput):
     out=[]
-    for planes in [4,8,12,16,20]:
-        for spp in [4,8,12,16]:
-            r=_coverage_proxy(x.model_copy(update={"planes":planes,"sats_per_plane":spp,"duration_hours":8,"time_step_sec":900}))
-            avg=sum(z["availability_pct"] for z in r["regions"])/len(r["regions"])
-            min_av=min(z["availability_pct"] for z in r["regions"])
-            out.append({
-                "planes":planes,"sats_per_plane":spp,"total_sats":planes*spp,
-                "avg_region_availability_pct":round(avg,2),
-                "min_region_availability_pct":round(min_av,2),
-            })
+    with job_slot():
+        for planes in [4,8,12,16,20]:
+            for spp in [4,8,12,16]:
+                r=_coverage_proxy(x.model_copy(update={"planes":planes,"sats_per_plane":spp,"duration_hours":8,"time_step_sec":900}))
+                avg=sum(z["availability_pct"] for z in r["regions"])/len(r["regions"])
+                min_av=min(z["availability_pct"] for z in r["regions"])
+                out.append({
+                    "planes":planes,"sats_per_plane":spp,"total_sats":planes*spp,
+                    "avg_region_availability_pct":round(avg,2),
+                    "min_region_availability_pct":round(min_av,2),
+                })
     return out
 
 

@@ -9,6 +9,32 @@ REGIONS={
  "Southeast Asia":{"lat_deg":10.0,"lon_deg":106.8},
 }
 
+# Practical ceiling on a single request's Walker propagation work, measured as
+# (time steps) * (satellites). Materializing the full time x satellite x xyz
+# array beyond this is both a large, sudden memory allocation and a long
+# uninterruptible compute burst; requests beyond this size are rejected with a
+# clear, actionable error instead of degrading the whole service.
+MAX_REQUEST_STEPS_X_SATS = 2_000_000
+
+# Default chunk size (time steps) used when streaming the propagation. Peak
+# memory for a chunk is O(chunk_steps * n_sats * 3 floats) instead of
+# O(total_steps * n_sats * 3), independent of how long the requested analysis
+# window is.
+DEFAULT_CHUNK_STEPS = 500
+
+class WalkerComputationTooLargeError(ValueError):
+    """Raised when a requested (steps * satellites) exceeds MAX_REQUEST_STEPS_X_SATS."""
+
+def check_request_size(n_steps, n_sats, limit=MAX_REQUEST_STEPS_X_SATS):
+    size = int(n_steps) * int(n_sats)
+    if size > limit:
+        raise WalkerComputationTooLargeError(
+            f"Requested Walker propagation is too large: {n_steps} time steps x "
+            f"{n_sats} satellites = {size} position samples, which exceeds the "
+            f"per-request limit of {limit}. Reduce duration_hours, increase "
+            f"time_step_sec, or reduce planes/sats_per_plane."
+        )
+
 def ground_ecef(lat_deg,lon_deg):
     lat=np.radians(lat_deg); lon=np.radians(lon_deg)
     u=np.array([np.cos(lat)*np.cos(lon),np.cos(lat)*np.sin(lon),np.sin(lat)])
@@ -69,7 +95,9 @@ def elevation_matrix(sats_xyz,ground_xyz,zenith):
 def regional_visibility_times(altitude_km,inclination_deg,planes,spp,walker_f,times_s,min_elev,region):
     reg=REGIONS[region]
     g,z=ground_ecef(reg["lat_deg"],reg["lon_deg"])
-    sats=walker_positions_times(altitude_km,inclination_deg,planes,spp,walker_f,times_s)
+    times=np.asarray(times_s,float)
+    check_request_size(len(times), max(1,int(planes)*int(spp)))
+    sats=walker_positions_times(altitude_km,inclination_deg,planes,spp,walker_f,times)
     elev,rng=elevation_matrix(sats,g,z)
     visible=elev>=min_elev
     return {
@@ -77,4 +105,50 @@ def regional_visibility_times(altitude_km,inclination_deg,planes,spp,walker_f,ti
       "max_elevation":elev.max(axis=1),
       "min_range":np.where(visible,rng,np.inf).min(axis=1),
       "elevation":elev,"range":rng,"visible":visible
+    }
+
+def walker_positions_times_chunked(altitude_km,inclination_deg,planes,sats_per_plane,walker_f,times_s,chunk_steps=DEFAULT_CHUNK_STEPS):
+    """
+    Stream the time x satellite x xyz Walker propagation in bounded-size chunks
+    over time, instead of allocating one array for every requested time step at
+    once (walker_positions_times' approach). Yields (time_slice, xyz_chunk)
+    pairs; concatenating every xyz_chunk along axis 0 reproduces
+    walker_positions_times(..., times_s) exactly, at a fraction of the peak
+    memory for long analysis windows.
+    """
+    times=np.asarray(times_s,float)
+    n_sats=max(1,int(planes)*int(sats_per_plane))
+    check_request_size(len(times), n_sats)
+    step=max(1,int(chunk_steps))
+    for start in range(0,len(times),step):
+        sl=times[start:start+step]
+        yield sl, walker_positions_times(altitude_km,inclination_deg,planes,sats_per_plane,walker_f,sl)
+
+def regional_visibility_times_multi(altitude_km,inclination_deg,planes,spp,walker_f,times_s,min_elev,regions,chunk_steps=DEFAULT_CHUNK_STEPS):
+    """
+    Compute visibility time series for several regions in a single streaming pass
+    over time, reusing each chunk's propagated satellite positions across every
+    region instead of recomputing the full Walker propagation once per region
+    (which is what calling regional_visibility_times() in a per-region loop does).
+    Returns {region: {"counts":..., "max_elevation":..., "min_range":...}}.
+    """
+    regions=list(regions)
+    grounds={r:ground_ecef(REGIONS[r]["lat_deg"],REGIONS[r]["lon_deg"]) for r in regions}
+    acc={r:{"counts":[],"max_elevation":[],"min_range":[]} for r in regions}
+    for _,xyz in walker_positions_times_chunked(altitude_km,inclination_deg,planes,spp,walker_f,times_s,chunk_steps):
+        for r in regions:
+            g,z=grounds[r]
+            elev,rng=elevation_matrix(xyz,g,z)
+            visible=elev>=min_elev
+            acc[r]["counts"].append(visible.sum(axis=1))
+            acc[r]["max_elevation"].append(elev.max(axis=1))
+            acc[r]["min_range"].append(np.where(visible,rng,np.inf).min(axis=1))
+    empty=np.array([])
+    return {
+        r:{
+            "counts":np.concatenate(acc[r]["counts"]) if acc[r]["counts"] else empty,
+            "max_elevation":np.concatenate(acc[r]["max_elevation"]) if acc[r]["max_elevation"] else empty,
+            "min_range":np.concatenate(acc[r]["min_range"]) if acc[r]["min_range"] else empty,
+        }
+        for r in regions
     }
