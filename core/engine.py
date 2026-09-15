@@ -1709,13 +1709,44 @@ def _longest_outage_sec(ok_series, step_s):
             longest=max(longest,cur)
     return longest*step_s
 
+def _longest_outage_duration_s(times, ok):
+    """
+    Longest outage duration (seconds), as the elapsed time between the first and
+    last bad (not-ok) sample of the longest run of consecutive bad samples, using
+    the actual sample times rather than assuming a fixed step width.
+
+    A run of N consecutive bad samples spans original-array indices
+    [start, start+N-1]; its elapsed duration is times[start+N-1] - times[start].
+    Multiplying the sample *count* N by the nominal step instead (the previous
+    approach) credits one extra full step-width beyond the last observed-bad
+    instant, over-reporting every outage by one step.
+    """
+    times=np.asarray(times,dtype=float)
+    ok=np.asarray(ok,dtype=bool)
+    if times.size==0:
+        return 0.0
+    bad=(~ok).astype(int)
+    padded=np.r_[0,bad,0]
+    starts=np.where(np.diff(padded)==1)[0]
+    ends=np.where(np.diff(padded)==-1)[0]
+    if len(starts)==0:
+        return 0.0
+    # `ends` (from the padded array) is one past the last bad index in the
+    # original array, so times[ends-1] is the last bad sample's actual time.
+    return float((times[ends-1]-times[starts]).max())
+
 def _coverage_proxy(x: CoverageInput):
     total=max(1,x.planes*x.sats_per_plane)
     period=orbital_period_s(x.altitude_km)
     psi_deg,foot_r,foot_a=footprint(x.altitude_km,x.min_elevation_deg)
     step=max(20.0,min(1800.0,x.time_step_sec))
-    duration=max(step,min(7*24*3600.0,x.duration_hours*3600.0))
-    times=np.arange(0,duration+0.5*step,step)
+    # Respect the requested analysis window exactly. Forcing duration up to at
+    # least `step` (the previous `max(step, ...)`) silently extended the analyzed
+    # period past what was asked whenever the time step exceeded the requested
+    # duration_hours. The window end is now always the requested duration itself.
+    requested_duration=max(0.0,min(7*24*3600.0,x.duration_hours*3600.0))
+    n_samples=max(2,int(np.floor(requested_duration/step))+1)
+    times=np.linspace(0,requested_duration,n_samples)
     rows=[]
     for key,reg in REGIONS.items():
         v=regional_visibility_times(
@@ -1725,12 +1756,7 @@ def _coverage_proxy(x: CoverageInput):
         counts=np.asarray(v["counts"])
         ok=counts>=x.target_min_visible
         avail=100*ok.mean()
-        # longest outage vectorized via run boundaries
-        bad=(~ok).astype(int)
-        padded=np.r_[0,bad,0]
-        starts=np.where(np.diff(padded)==1)[0]
-        ends=np.where(np.diff(padded)==-1)[0]
-        longest=(ends-starts).max()*step if len(starts) else 0.0
+        longest=_longest_outage_duration_s(times,ok)
         rows.append({
             "region":key,"latitude_deg":reg["lat_deg"],"longitude_deg":reg["lon_deg"],
             "availability_pct":round(float(avail),3),"continuity_pct":round(float(avail),3),
@@ -1856,11 +1882,15 @@ def api_pass_timeline(x: PassTimelineInput):
     )
     g,z=_ground_ecef(reg["lat_deg"],reg["lon_deg"])
     step=max(10.0,min(900.0,x.time_step_sec))
-    duration=max(step,min(48*3600.0,x.duration_hours*3600.0))
-    steps=max(2,int(duration/step)+1)
+    # Respect the requested analysis window exactly -- do not extend it to fit a
+    # whole number of steps when the step is larger than the requested duration
+    # (see _coverage_proxy for the matching fix and rationale).
+    requested_duration=max(0.0,min(48*3600.0,x.duration_hours*3600.0))
+    n_samples=max(2,int(np.floor(requested_duration/step))+1)
+    times=np.linspace(0,requested_duration,n_samples)
     rows=[]
-    for j in range(steps):
-        t=j*step
+    for t in times:
+        t=float(t)
         sats=_walker_satellite_positions_ecef(cov,t)
         sats2=_walker_satellite_positions_ecef(cov,t+1.0)
         visible=[]
