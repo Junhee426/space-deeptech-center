@@ -1181,7 +1181,12 @@ def payload(x:PayloadInput):
 
     # Co-channel interference and precoding
     geometry=_geometry_channel_matrix(x) if x.geometry_channel_enabled else None
-    if geometry and geometry["visible"]:
+    if x.geometry_channel_enabled:
+        # geometry["visible"] False means no satellite is visible anywhere in the
+        # region (H is then all-zero, per _geometry_channel_matrix). That must flow
+        # through as genuine zero SINR/throughput below -- it must NOT be replaced by
+        # the synthetic/idealized architecture-level channel model, which would
+        # fabricate a non-zero capacity for a scenario that has no actual link.
         H=np.asarray(geometry["H"],dtype=complex)
         W=_precoder_np(H,x.precoding_method,x.rzf_lambda) if x.precoding_enabled else _precoder_np(H,"MRT",0.0)
         # traffic shares become stream-power weights for physically connected SINR
@@ -1259,7 +1264,9 @@ def payload(x:PayloadInput):
           "user_range_km":[round(v,3) if v is not None else None for v in (geometry["user_range_km"] if geometry else [])],
           "user_visible":[bool(v) for v in (geometry.get("user_visible",[]) if geometry else [])],
           "beam_centers":[{"lat":round(v[0],5),"lon":round(v[1],5)} for v in (geometry["beam_centers"] if geometry else [])],
-          "channel_source":"Walker geometry + range + phase + Gaussian beam pattern" if geometry and geometry["visible"] else "synthetic fallback"
+          "channel_source":("Walker geometry + range + phase + Gaussian beam pattern" if geometry and geometry["visible"]
+                             else "no visible satellite (zero channel; no synthetic substitute)" if x.geometry_channel_enabled
+                             else "synthetic architecture-level channel model")
       },
       "power":{"pa_dc_w":round(pa_dc,1),"total_w":round(total_power,1),"heat_w":round(heat,1),"radiator_m2":round(radiator,3)},
       "system":{"mass_kg":round(mass,1),"processed_bw_mhz":round(processed_bw,1),"service_index":round(service_index,2),
@@ -1273,7 +1280,7 @@ def payload(x:PayloadInput):
         "Frequency reuse >1 requires explicit co-channel SINR / precoding validation." if x.frequency_reuse>1 else "",
         "Regenerative processing increases onboard compute, software verification and thermal burden." if x.architecture!="Bent-Pipe" else "",
         "Beam-hopping gain is a scheduler abstraction, not a propagation law.",
-        "No visible serving satellite at the selected geometry/time; synthetic channel fallback is used." if x.geometry_channel_enabled and (not geometry or not geometry["visible"]) else "",
+        "No visible serving satellite at the selected geometry/time; channel is zero and throughput is 0 Mbps for every user (no synthetic fallback)." if x.geometry_channel_enabled and (not geometry or not geometry["visible"]) else "",
         "Sampled HPA EVM/ACLR remains a memoryless baseband approximation; no PA memory effects or spectral-mask certification."
       ] if w]
     }
@@ -1378,8 +1385,14 @@ def api_integrated(x: IntegratedInput):
     r = radiation(x.radiation)
 
     # 5) Integrated proxies
-    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps",0.0)
-    deterministic_cap = payload_cap if payload_cap > 0 else s["link"]["aggregate_gbps"]
+    # payload() always computes aggregate_scheduled_gbps -- including a genuine 0.0
+    # when geometry_channel_enabled is true but no satellite is visible to any user
+    # (see payload()'s geometry branch). Treating that computed 0 as "missing" and
+    # silently substituting the idealized satcom-link estimate would hide a real
+    # zero-capacity result behind a synthetic positive number. Only fall back when
+    # the value is truly absent (None), never when it is a legitimate 0.
+    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps")
+    deterministic_cap = payload_cap if payload_cap is not None else s["link"]["aggregate_gbps"]
     effective_capacity_gbps = deterministic_cap * (r["service"]["electronics_availability_pct"] / 100.0)
     payload_power_combined = max(s["payload"]["power_w"], p["power"]["total_w"])
     payload_mass_combined = max(s["payload"]["mass_kg"], p["system"]["mass_kg"])
@@ -1488,8 +1501,10 @@ def integrated_calc(x: IntegratedInput):
     p = payload(payload_in)
     r = radiation(x.radiation)
 
-    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps",0.0)
-    deterministic_cap = payload_cap if payload_cap > 0 else s["link"]["aggregate_gbps"]
+    # See api_integrated()'s matching comment: a computed 0 (e.g. no visible
+    # satellite) must never be silently replaced by the idealized link fallback.
+    payload_cap = p.get("traffic",{}).get("aggregate_scheduled_gbps")
+    deterministic_cap = payload_cap if payload_cap is not None else s["link"]["aggregate_gbps"]
     eff_cap = deterministic_cap * (r["service"]["electronics_availability_pct"]/100)
     payload_power = max(s["payload"]["power_w"], p["power"]["total_w"])
     payload_mass = max(s["payload"]["mass_kg"], p["system"]["mass_kg"])
