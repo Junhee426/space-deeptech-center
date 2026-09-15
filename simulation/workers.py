@@ -37,7 +37,8 @@ def monte_carlo_case_worker(arg):
     d=arg["draw"]
     sat=base.satcom.model_copy(update={
         "rf_output_w":d["rf"],"bandwidth_mhz":d["bw"],
-        "losses_db":d["loss"],"processor_tops":d["tops"]
+        "losses_db":d["loss"],"processor_tops":d["tops"],
+        "pa_efficiency_override":d["pa_eff"]
     })
     beam=base.beam.model_copy(update={"bandwidth_mhz":d["bw"],"available_tops":d["tops"]})
     rad=base.radiation.model_copy(update={"tid_env_krad_yr":d["tid"],"seu_rate_device_day":d["seu"]})

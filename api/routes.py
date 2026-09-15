@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from core.version import VERSION
 from core import engine
 from simulation import services
 
@@ -68,9 +68,10 @@ def performance(): return engine.api_performance()
 @router.get("/architecture")
 def architecture():
     return {
-      "version":"0.6.0",
+      "version":VERSION,
       "bootstrap":"app.py",
       "engine":"core/engine.py",
+      "models":"core/models.py",
       "api":"api/routes.py",
       "simulation":"simulation/services.py + workers.py + batch.py",
       "numerics":["physics/core.py","orbit/walker.py","payload/vectorized.py"],
@@ -79,4 +80,4 @@ def architecture():
 
 @router.get("/health")
 def health():
-    return {"status":"ok","version":"0.6.0","labs":9,"physics_models":len(engine.PHYSICS_REGISTRY)}
+    return {"status":"ok","version":VERSION,"labs":9,"physics_models":len(engine.PHYSICS_REGISTRY)}

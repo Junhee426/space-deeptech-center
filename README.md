@@ -1,68 +1,47 @@
-# Space Deep Tech Center V0.6
+# Space Deep Tech Center V0.7.0
 
-This release renumbers the project to **V0.5** and focuses on computational architecture.
+A FastAPI engineering workbench for satellite links, digital beamforming, RF payloads, radiation, constellation coverage and mission trade studies.
 
-## Major optimization work
+## V0.7 upgrade
 
-### 1. Monte Carlo
-Random parameter generation is vectorized with NumPy.
-The simulation package also provides `ProcessPoolExecutor` based `parallel_map()` for CPU-bound batch workloads.
+- **Geometry and service:** user elevation uses the ground-to-satellite direction. Users below the elevation mask have zero channel gain. A geometry-enabled scenario with no visible serving satellite produces zero throughput; zero effective beams also produce zero service. Synthetic channels are used only when geometry is explicitly disabled, including Fast batch screening.
+- **Shared calculations:** interactive mission results and batch evaluation use the same integrated calculation. Request models live in `core/models.py` and remain available through `core.engine` for compatibility.
+- **Uncertainty:** Monte Carlo samples PA efficiency and applies the same efficiency to the link and payload power/thermal calculations. The requested run count (1–5,000) is respected. A fixed seed reproduces V0.7 results; outputs differ from V0.6 because efficiency uncertainty is now included.
+- **Bounded workloads:** Coverage reduces visibility in chunks of at most 65,536 satellite-time cells. API models reject invalid physical inputs and excessive orbit/batch workloads with HTTP 422.
+- **Batch execution:** Optimizer and Monte Carlo reuse a process pool with two workers by default. `SDTC_MAX_WORKERS=1` selects serial execution; values are capped at eight and the host CPU count. One batch is admitted per API process; concurrent requests receive HTTP 503 with `Retry-After: 2`. Calculation errors propagate; pool unavailability is logged and reported as `serial-fallback`. Responses report the actual `parallel` and `execution` values.
+- **Dependencies:** FastAPI 0.141.1, Starlette 1.6.0, Uvicorn 0.53.0 and Jinja2 3.1.6. Windows uses Uvicorn's portable HTTP implementation; other platforms retain its standard extras.
 
-### 2. Optimizer batch grid
-Design-space combinations are generated as one NumPy mesh rather than constructed ad hoc.
-The existing evaluator is preserved for numerical compatibility while the batch layer is ready for parallel case evaluation.
+## Run
 
-### 3. Walker time propagation
-`orbit/walker.py` propagates the full `time × satellite × xyz` array in NumPy:
-- Walker phase
-- circular Kepler mean motion
-- inclination / RAAN
-- Earth rotation
-- ECI → ECEF
-- topocentric regional visibility
+Python 3.11 or later:
 
-This removes the previous Python loop over every time sample.
-
-### 4. Modular architecture
-```text
-app.py
-physics/
-  core.py
-orbit/
-  walker.py
-payload/
-  vectorized.py
-simulation/
-  batch.py
-api/
-  routes.py
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8765
 ```
 
-The legacy API surface remains available from `app.py` to avoid breaking the Render frontend while physics and high-cost numerical kernels are progressively moved into dedicated modules.
+Open http://127.0.0.1:8765. The existing Render service configuration is in `render.yaml`.
 
-### 5. Full / Fast strategy
-- Interactive RF Payload: Full
-- Optimizer: Fast screening
-- Monte Carlo: Fast screening
-- Sensitivity: Fast screening
+## Structure
 
-## KASA visual identity
-The UI retains the previous KASA-inspired palette:
-- Navy `#012B49`
-- Red `#F94239`
+```text
+app.py                FastAPI bootstrap, lifespan and overload response
+api/routes.py         API routes
+core/models.py        Validated request models and workload limits
+core/engine.py        Domain models and shared mission calculation
+core/version.py       Application version
+physics/core.py       Scalar physical utilities
+orbit/walker.py       Vectorized propagation and chunked visibility
+payload/vectorized.py Signal-processing kernels
+simulation/           Batch services, shared process pool and workers
+static/, templates/   Interactive workbench
+```
 
-## New diagnostic API
-`GET /api/architecture`
-`GET /api/performance`
+Diagnostics: `GET /api/health`, `/api/architecture`, `/api/performance`.
 
-## Recommended next refactor
-V0.6 should move the remaining legacy endpoint functions out of `app.py`, leaving it as a thin FastAPI bootstrap file only.
+## Validation
 
+See [tests/README.md](tests/README.md) for Python and browser regressions, and [BENCHMARK.md](BENCHMARK.md) for recorded performance context.
 
-## Actual parallel endpoints
-- `/api/optimize` now evaluates the batched candidate grid with a bounded `ProcessPoolExecutor`.
-- `/api/montecarlo` vectorizes all random draws first, then distributes independent system cases to the process pool.
-- Both automatically fall back to serial evaluation if process creation is unavailable in the deployment environment.
-
-
-See `BENCHMARK.md` for the fresh-process V0.6 performance audit.
+The UI retains the KASA-inspired navy `#012B49` and red `#F94239`. Orbit models remain circular two-body approximations; J2, drag, eccentricity and refraction are outside their scope. Fast screening results require confirmation with the intended geometry. Mass, cost and thermal layout indicators are engineering proxies.

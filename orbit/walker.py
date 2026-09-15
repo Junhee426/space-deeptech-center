@@ -78,3 +78,20 @@ def regional_visibility_times(altitude_km,inclination_deg,planes,spp,walker_f,ti
       "min_range":np.where(visible,rng,np.inf).min(axis=1),
       "elevation":elev,"range":rng,"visible":visible
     }
+
+
+def regional_visibility_summary(altitude_km, inclination_deg, planes, spp,
+                                walker_f, times_s, min_elev, region):
+    """Reduce visibility in bounded chunks; retain only one count per time sample."""
+    times = np.asarray(times_s, dtype=float)
+    counts = np.empty(len(times), dtype=np.int64)
+    # Bound all temporary arrays by satellite-time cells, regardless of constellation size.
+    chunk_size = max(1, 65536 // max(1, planes * spp))
+    for start in range(0, len(times), chunk_size):
+        stop = min(start + chunk_size, len(times))
+        chunk = regional_visibility_times(
+            altitude_km, inclination_deg, planes, spp, walker_f,
+            times[start:stop], min_elev, region,
+        )
+        counts[start:stop] = chunk["counts"]
+    return {"counts": counts}
