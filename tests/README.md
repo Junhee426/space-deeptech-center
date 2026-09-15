@@ -30,3 +30,11 @@ Optional environment variables: `APP_URL` selects the local app URL; `CHROMIUM_P
 Browser coverage: 10 views at 1440/1024/390px; visible run buttons; shared mission geometry; PHY and beamforming architecture labels; ISL visibility; calculated SVG dimensions; invalid input; stale responses; error messages; warning stability; saved scenario restoration; Optimizer execution.
 
 Batch control is per API process. Use the deployment's single Uvicorn worker for one global batch limit, or size process/worker counts together. Clients should retry a 503 after the returned delay; the browser displays the error and supports rerunning the action.
+
+The detailed CONOPS suite uses the same server and browser environment:
+
+```powershell
+node tests/conops-regression.cjs
+```
+
+It checks all three diagram views at 1440/1024/390px, beam rendering limits, altitude/elevation geometry, Walker phasing, ISL visibility, architecture-dependent signal paths, antenna sizing, layer controls, animation/reduced-motion behavior, and invalid-input recovery. `REVIEW_OUTPUT` additionally captures the overall, payload, coverage and mobile illustrations.

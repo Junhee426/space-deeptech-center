@@ -264,3 +264,22 @@ main,.view,.lab-content,.panel,.lab-title>div,.main-header>div{min-width:0}
 .action-error{padding:12px;border:1px solid #f94239;border-radius:8px;background:#472423;color:#ffd7d4;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .lab-title>.action-error{flex:0 0 100%;margin:0}
 .mission-bar>.action-error{grid-column:1/-1;max-width:100%;white-space:normal}
+
+/* Detailed isometric CONOPS scene and accessible, local display controls. */
+.conops-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:18px 0 12px}
+.conops-views,.conops-options{display:flex;gap:5px;flex-wrap:wrap}
+.conops-toolbar button{width:auto;min-height:36px;margin:0;padding:8px 12px;border:1px solid #31536b;border-radius:7px;background:#091b2c;color:#a8bfce;font-size:12px;cursor:pointer}
+.conops-views button[aria-pressed="true"]{background:#25475c;border-color:#86b8cc;color:#f0f8ff}
+.conops-options button[aria-pressed="true"]{background:#122f41;color:#bde8ef;border-color:#437488}
+.conops-toolbar button:hover{border-color:#aed3e4;color:#fff}
+.conops-toolbar button:focus-visible,.conops-diagram:focus-visible{outline:2px solid #a2d7ef;outline-offset:3px}
+.conops-diagram{border-color:#345066;border-radius:12px;background:#081525}
+.conops-diagram svg{min-width:900px;font-family:Inter,system-ui,sans-serif}
+.conops-hide-links .conops-links,.conops-hide-labels .conops-label{display:none}
+.conops-playing .conops-flow{animation:conops-flow 2s linear infinite}
+.conops-playing .conops-return{animation-direction:reverse}
+.conops-reference{font-size:11px;line-height:1.8;color:#91a9bb;margin:12px 0 0}
+.conops-reference a{color:#b4cedf;text-underline-offset:3px}
+@keyframes conops-flow{to{stroke-dashoffset:-68}}
+@media(prefers-reduced-motion:reduce){.conops-playing .conops-flow{animation:none}}
+@media(max-width:560px){.conops-toolbar{align-items:flex-start}.conops-toolbar button{padding:9px 10px}.conops-reference{font-size:11px}}

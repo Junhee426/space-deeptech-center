@@ -12,3 +12,16 @@ The Mission CONOPS work from `d4f8adb` is integrated with shared design inputs a
 Validation passed: Python geometry regression for both integrated paths; JavaScript syntax and Git whitespace checks; browser regression over all 30 view/width combinations; shared-input and SVG changes; invalid/stale/failed requests; persistence; Optimizer execution. No browser page errors occurred. See `tests/README.md` for reproduction.
 
 Local review captures are in `artifacts/ui-integration-2026-09-14/`. Artifacts from the earlier review are retained separately. Deployment validation is outside this local integration check.
+
+## Interactive mission illustration
+
+The Mission Center includes a locally rendered isometric SVG illustration with three views: overall operations, spacecraft/payload detail, and coverage. Display buttons toggle link paths, labels, and flow animation; reduced-motion preferences disable animation. These view controls do not change or save engineering inputs.
+
+- Altitude moves the primary satellite; altitude and minimum elevation change the illustrative coverage envelope. The displayed ground-arc radius uses `6371 * (acos(6371 / (6371 + altitude) * cos(elevation)) - elevation)` with angles in radians.
+- Walker plane count, satellites per plane, inclination, and phasing change representative orbital tracks and satellites. Rendering is capped at 5 planes, 4 satellites per plane, and 12 beams, with actual input counts shown in labels.
+- Beamforming architecture/elements, frequency/bandwidth, antenna diameter, payload architecture/stack, and ISL offload update the illustration immediately. The payload view distinguishes RF relay from digital processing paths.
+- Body size, solar panel size, and radiator size use bounded relative proxies from the current calculated mass, payload power, and radiator area. Modified inputs show preview state until RUN/SYNC completes.
+
+The illustration is not a freely rotatable 3D model or an orbit propagation result. Landforms, orbit positions, user terminals, beam centers and individual beam widths are schematic; the visibility envelope is not a link-qualified service area. The solar panels represent relative payload demand, not a complete solar-array sizing model.
+
+Composition references: [ESA Ground segment](https://www.esa.int/ESA_Multimedia/Images/2012/12/Ground_segment) and [Copernicus Ground Segment overview](https://www.esa.int/Applications/Observing_the_Earth/Copernicus/Ground_Segment_overview). Artwork is generated locally from SVG geometry; source images are not embedded.

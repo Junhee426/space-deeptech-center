@@ -254,7 +254,8 @@ function renderConops(){
  const orbit=constellationObj(),alt=orbit.altitude_km,minEl=orbit.min_elevation_deg;
  const freq=num('g_freq'),bw=num('g_bw'),elements=num('g_elem'),beams=num('g_beams');
  const valid=[alt,freq,bw,elements,beams,orbit.planes,orbit.sats_per_plane].every(v=>Number.isFinite(v)&&v>0)&&
-  [elements,beams,orbit.planes,orbit.sats_per_plane,orbit.walker_f].every(Number.isInteger)&&Number.isFinite(minEl)&&minEl>=0&&minEl<90&&Number.isFinite(orbit.inclination_deg);
+  [elements,beams,orbit.planes,orbit.sats_per_plane,orbit.walker_f].every(Number.isInteger)&&Number.isFinite(minEl)&&minEl>=0&&minEl<90&&Number.isFinite(orbit.inclination_deg)&&orbit.inclination_deg>=0&&orbit.inclination_deg<=180&&
+  Number.isFinite(num('s_dia'))&&num('s_dia')>0&&orbit.walker_f>=0&&orbit.walker_f<orbit.planes;
  if(!valid){
   $('conopsDiagram').textContent='유효한 고도·주파수·빔 수·군집 설정을 입력하면 그림이 표시됩니다.';
   $('conopsCaption').textContent='입력 확인 필요';$('conopsDetails').textContent='';return;
@@ -268,43 +269,14 @@ function renderConops(){
  const arch=$('p_arch').value,stack=$('p_stack').value,beamArch=$('b_arch').value;
  const archLabel=arch==='Bent-Pipe'?'Bent-Pipe · RF relay':arch+' · '+stack;
  const isl=Math.max(0,Math.min(1,num('p_isl')||0));
- const W=900,H=390,groundY=285,satX=450,satY=175-Math.max(0,Math.min(90,(alt-300)/1700*90));
- const halfWidth=70+Math.max(.15,Math.min(1,(85-minEl)/75))*230;
- const shown=Math.min(beams,7),total=orbit.planes*orbit.sats_per_plane;
- let beamLines='',terminals='';
- for(let n=0;n<shown;n++){
-  const x=satX+halfWidth*.82*(shown===1?0:2*n/(shown-1)-1);
-  beamLines+=`<path d="M${satX},${satY+bodySize} L${x},${groundY}" stroke="#F94239" stroke-width="1.5" opacity=".65"/>`;
-  terminals+=`<path d="M${x-5},${groundY} h10 v-8 h-10 z M${x},${groundY-8} v-8" fill="#12384f" stroke="#7ec8df"/>`;
- }
- $('conopsDiagram').innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="conopsTitle conopsDesc">
-  <title id="conopsTitle">${escapeMarkup(archLabel)}, ${alt} km, ${beams} beams, ${total} satellites</title>
-  <desc id="conopsDesc">설계 입력 운용개념도. 실제 축척이 아닙니다. ${current?'위성 크기와 패널은 현재 계산 결과의 상대적 크기입니다.':'전력·열·질량을 계산하면 상대적 크기가 갱신됩니다.'}</desc>
-  <path d="M0,${groundY} Q450,320 900,${groundY} V390 H0 Z" fill="#0a2638"/>
-  <path d="M0,${groundY} H900" stroke="#315b75"/>
-  <path d="M145,${satY+35} Q450,${satY-45} 755,${satY+35}" fill="none" stroke="#4f9fc7" stroke-dasharray="4 6"/>
-  <path d="M450,${satY+bodySize} L${450-halfWidth},${groundY} H${450+halfWidth} Z" fill="#7ec8df" opacity=".08"/>
-  ${beamLines}${terminals}
-  <path d="M85,${groundY-20} L${satX-bodySize},${satY+bodySize}" stroke="#d6b66d" stroke-width="2" stroke-dasharray="4 5"/>
-  <g transform="translate(85,${groundY})" stroke="#d6b66d" fill="#12384f"><rect x="-12" y="-18" width="24" height="18"/><circle cy="-24" r="7"/></g>
-  <g id="conopsSatellite" transform="translate(${satX},${satY})">
-   <rect id="conopsBody" x="${-bodySize}" y="${-bodySize}" width="${bodySize*2}" height="${bodySize*2}" rx="3" fill="#153d56" stroke="#b8e6f3" stroke-width="2"/>
-   <g fill="#174a6b" stroke="#7ec8df"><rect id="conopsSolar" x="${-bodySize-wing-5}" y="-8" width="${wing}" height="16"/><rect x="${bodySize+5}" y="-8" width="${wing}" height="16"/></g>
-   <rect id="conopsRadiator" x="${bodySize+4}" y="13" width="${radiatorSize}" height="9" fill="#b1c5d0" stroke="#fff"/>
-  </g>
-  ${isl>0?`<g id="conopsISL"><path d="M${satX+bodySize+wing+8},${satY} L735,${satY-15}" stroke="#9fbdf7" stroke-width="2" stroke-dasharray="6 4"/><rect x="735" y="${satY-22}" width="14" height="14" fill="#174a6b" stroke="#9fbdf7"/><text x="660" y="${satY-30}" fill="#c9d9ff">ISL ${Math.round(isl*100)}%</text></g>`:''}
-  <g fill="#dce8ee" font-size="14" font-family="system-ui,sans-serif">
-   <text x="20" y="28">ALTITUDE ${alt} km</text>
-   <text x="20" y="51">Walker ${orbit.planes} × ${orbit.sats_per_plane} · ${orbit.inclination_deg}° · F ${orbit.walker_f}</text>
-   <text x="450" y="${satY-bodySize-15}" text-anchor="middle" fill="#ffa39d">${escapeMarkup(archLabel)}</text>
-   <text x="450" y="${satY+bodySize+38}" text-anchor="middle">${escapeMarkup(beamArch)} · ${elements} elements</text>
-   <text x="85" y="${groundY+27}" text-anchor="middle" fill="#e7d6a8">GATEWAY</text>
-   <text x="148" y="${groundY-65}" fill="#e7d6a8">Feeder ${freq} GHz</text>
-   <text x="700" y="${groundY-40}" text-anchor="middle" fill="#ffa39d">${beams} beams · ${shown} shown</text>
-   <text x="450" y="${groundY+27}" text-anchor="middle">${minEl}° min elevation · ${bw} MHz</text>
-   <text x="450" y="362" text-anchor="middle" fill="#a9c4d4">${current?'계산 결과 반영 · 상대 크기':'입력 미리보기 · 크기는 계산 후 반영'} / Not to scale</text>
-  </g>
- </svg>`;
+ const total=orbit.planes*orbit.sats_per_plane,shown=Math.min(beams,12);
+ // Circular-Earth visibility envelope from altitude and minimum elevation.
+ // Beam centers and orbit phases in the illustration remain schematic.
+ const elevation=minEl*Math.PI/180;
+ const footprint=6371*(Math.acos(Math.min(1,6371/(6371+alt)*Math.cos(elevation)))-elevation);
+ $('conopsDiagram').innerHTML=conopsScene({orbit,alt,minEl,freq,bw,elements,beams,total,
+  bodySize,wing,radiatorSize,mass,power,radiator,heat:result?.payload.power.heat_w,
+  arch,stack,beamArch,archLabel,isl,current,footprint,dish:num('s_dia')});
  $('conopsCaption').textContent=`${archLabel} · ${alt} km · 최소 고도각 ${minEl}° · ${beams} beams (${shown}개 표시) · ${orbit.planes}×${orbit.sats_per_plane} Walker (${total} sats) · ${orbit.inclination_deg}° / F ${orbit.walker_f} · ${freq} GHz / ${bw} MHz`;
  const details=current?[['위성 질량',mass+' kg'],['탑재체 전력',power+' W'],['열 부하',result.payload.power.heat_w+' W'],['방열판 면적',radiator+' m²']]:[['설계 상태','입력 미리보기'],['크기 반영','RUN 또는 SYNC 후 갱신']];
  $('conopsDetails').innerHTML=details.map(([label,value])=>`<div><span>${label}</span><b>${escapeMarkup(value)}</b></div>`).join('');

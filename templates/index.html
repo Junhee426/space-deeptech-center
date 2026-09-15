@@ -72,10 +72,23 @@
       <div class="panel conops-panel">
         <div class="section-title"><span>MISSION CONOPS</span><b>설계 값에 따라 실시간으로 갱신되는 운용개념도</b></div>
         <p class="physics-note">고도·군집·빔·탑재체 구조는 입력 즉시 반영됩니다. 위성·태양전지판·방열판 크기는 계산된 질량·탑재체 전력·방열 면적의 상대적 표현입니다.</p>
+        <div class="conops-toolbar" aria-label="운용개념도 표시 설정">
+          <div class="conops-views" role="group" aria-label="보기 선택">
+            <button type="button" data-conops-view="overview" aria-pressed="true">전체 운용</button>
+            <button type="button" data-conops-view="payload" aria-pressed="false">탑재체 상세</button>
+            <button type="button" data-conops-view="coverage" aria-pressed="false">커버리지</button>
+          </div>
+          <div class="conops-options">
+            <button type="button" data-conops-toggle="links" aria-pressed="true">통신 경로</button>
+            <button type="button" data-conops-toggle="labels" aria-pressed="true">라벨</button>
+            <button type="button" data-conops-toggle="motion" aria-pressed="false">흐름 재생</button>
+          </div>
+        </div>
         <div id="conopsDiagram" class="conops-diagram" tabindex="0" role="region" aria-label="위성 운용개념도, 작은 화면에서는 좌우로 스크롤하세요"></div>
         <p class="conops-scroll-hint">그림을 좌우로 밀어 전체 구조를 확인하세요.</p>
         <div id="conopsDetails" class="conops-details"></div>
         <p id="conopsCaption" class="conops-caption"></p>
+        <p class="conops-reference">구성 참고: <a href="https://www.esa.int/ESA_Multimedia/Images/2012/12/Ground_segment" target="_blank" rel="noopener noreferrer">ESA Ground segment</a> · <a href="https://www.esa.int/Applications/Observing_the_Earth/Copernicus/Ground_Segment_overview" target="_blank" rel="noopener noreferrer">Copernicus ground operations</a>. 입체 개념 일러스트 · 궤도와 지형은 도식적 표현입니다.</p>
       </div>
 
       <div class="dashboard-grid">
@@ -506,5 +519,6 @@
 </div>
 
 <footer>Space Deep Tech Center V{{ version }} · Integrated parametric engineering environment · Not qualification evidence.</footer>
+<script src="/static/conops.js"></script>
 <script src="/static/app.js"></script>
 </body></html>
