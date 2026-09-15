@@ -1,5 +1,6 @@
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 import os
 
 def batched_design_grid(materials,processors,altitudes,beams,rf,elems,bw):
@@ -18,10 +19,18 @@ def parallel_map(func,items,max_workers=None,chunksize=16):
     workers=max_workers or max(1,min(8,(os.cpu_count() or 2)-1))
     if workers<=1 or len(items)<32:
         return [func(x) for x in items]
+    # Fall back to serial only when the process pool itself is unusable (can't spawn
+    # processes in this deployment, or a worker crashed outright). A genuine exception
+    # raised by func() on a specific item is a real bug and should propagate immediately
+    # instead of silently re-running the whole batch serially just to hit it again.
     try:
-        with ProcessPoolExecutor(max_workers=workers) as ex:
+        ex=ProcessPoolExecutor(max_workers=workers)
+    except OSError:
+        return [func(x) for x in items]
+    try:
+        with ex:
             return list(ex.map(func,items,chunksize=chunksize))
-    except Exception:
+    except BrokenProcessPool:
         return [func(x) for x in items]
 
 def monte_carlo_draws(rng,runs,means,sigmas):

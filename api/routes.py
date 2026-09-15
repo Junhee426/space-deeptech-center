@@ -73,7 +73,7 @@ def architecture():
       "engine":"core/engine.py",
       "api":"api/routes.py",
       "simulation":"simulation/services.py + workers.py + batch.py",
-      "numerics":["physics/core.py","orbit/walker.py","payload/vectorized.py"],
+      "numerics":["physics/core.py","orbit/walker.py"],
       "design":"thin FastAPI bootstrap with domain numerical modules"
     }
 

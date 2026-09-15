@@ -26,12 +26,12 @@ This removes the previous Python loop over every time sample.
 ### 4. Modular architecture
 ```text
 app.py
+core/
+  engine.py
 physics/
   core.py
 orbit/
   walker.py
-payload/
-  vectorized.py
 simulation/
   batch.py
 api/

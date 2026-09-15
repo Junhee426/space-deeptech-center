@@ -3,24 +3,18 @@ from math import log10, log2, sqrt, cos, acos, sin, radians, degrees, pi
 from io import StringIO
 import csv
 import math
-import random
-from statistics import mean
 import numpy as np
 from functools import lru_cache
 
 from simulation.batch import batched_design_grid, parallel_map, monte_carlo_draws
 from simulation.workers import optimize_case_worker, monte_carlo_case_worker
 from orbit.walker import walker_positions_times, regional_visibility_times
-
-# Physics core constants (SI unless noted)
-R_EARTH = 6371.0              # mean spherical Earth radius [km]
-MU_EARTH = 398600.4418        # Earth GM [km^3/s^2]
-OMEGA_EARTH = 7.2921159e-5    # sidereal rotation [rad/s]
-C_LIGHT = 299792458.0         # [m/s]
-K_BOLTZ = 1.380649e-23        # [J/K]
-SIGMA_SB = 5.670374419e-8     # Stefan-Boltzmann [W/m^2/K^4]
-T_SPACE = 3.0                 # deep-space sink approximation [K]
-K_DBW = 10*log10(K_BOLTZ)     # about -228.6 dBW/K/Hz
+from physics.core import (
+    R_EARTH, MU_EARTH, OMEGA_EARTH, C_LIGHT, K_BOLTZ, SIGMA_SB, T_SPACE, K_DBW,
+    db_to_lin, lin_to_db, dbw, slant_range, footprint, fspl,
+    orbital_period_s, orbital_speed_km_s, antenna_gain_dbi,
+    noise_temp_from_nf_db, thermal_radiator_area,
+)
 
 MATERIALS = {
     "Si":{"name":"Silicon","pa_eff":0.28,"lna_nf":2.2,"thermal":0.70,"rad":0.55,"cost":1.0,"maturity":0.98,"freq":20,"density":2.33},
@@ -44,25 +38,6 @@ PARTS = {
 
 ORBIT_PRESETS = {"500":500,"888":888,"1280":1280}
 
-def db_to_lin(x): return 10**(x/10)
-def lin_to_db(x): return 10*log10(max(x,1e-18))
-def dbw(w): return 10*log10(max(w,1e-18))
-
-def slant_range(alt,elev):
-    e=radians(elev); return sqrt((R_EARTH+alt)**2-(R_EARTH*cos(e))**2)-R_EARTH*sin(e)
-
-def footprint(alt,elev):
-    e=radians(elev)
-    val=max(-1,min(1,(R_EARTH/(R_EARTH+alt))*cos(e)))
-    psi=max(0,acos(val)-e)
-    radius=R_EARTH*psi
-    area=2*pi*R_EARTH**2*(1-cos(psi))
-    return degrees(psi),radius,area
-
-def fspl(freq_ghz,dist_km): return 92.45+20*log10(freq_ghz)+20*log10(dist_km)
-
-
-
 @lru_cache(maxsize=2048)
 def _cached_slant_range(altitude_km, elevation_deg):
     return slant_range(float(altitude_km), float(elevation_deg))
@@ -83,28 +58,6 @@ def _cached_orbit_scalar(altitude_km):
 @lru_cache(maxsize=512)
 def _cached_antenna_gain(diameter_m, efficiency, frequency_ghz):
     return antenna_gain_dbi(float(diameter_m), float(efficiency), float(frequency_ghz))
-
-def orbital_period_s(altitude_km: float) -> float:
-    a = R_EARTH + altitude_km
-    return 2*pi*sqrt(a**3/MU_EARTH)
-
-def orbital_speed_km_s(altitude_km: float) -> float:
-    a = R_EARTH + altitude_km
-    return sqrt(MU_EARTH/a)
-
-def antenna_gain_dbi(diameter_m: float, efficiency: float, frequency_ghz: float) -> float:
-    lam = C_LIGHT/(frequency_ghz*1e9)
-    g = max(1e-15, efficiency*(pi*diameter_m/lam)**2)
-    return lin_to_db(g)
-
-def noise_temp_from_nf_db(nf_db: float, t0_k: float = 290.0) -> float:
-    return t0_k*(db_to_lin(nf_db)-1.0)
-
-def thermal_radiator_area(heat_w: float, temp_k: float, emissivity: float, view_factor: float, margin_pct: float = 0.0) -> float:
-    eps=max(0.01,min(1.0,emissivity))
-    vf=max(0.01,min(1.0,view_factor))
-    net_flux=eps*SIGMA_SB*vf*max(1.0,temp_k**4-T_SPACE**4)
-    return max(0.0, heat_w*(1.0+margin_pct/100.0)/net_flux)
 
 def practical_spectral_efficiency(snr_db: float, gap_db: float, max_eff: float) -> float:
     # Shannon-like achievable-rate model with implementation/coding gap Γ.
@@ -528,86 +481,6 @@ def _complex_channel_matrix(beams, users, coupling_db):
         H.append(row)
     return H
 
-def _mat_h_hermitian(H):
-    if not H:return []
-    rows=len(H); cols=len(H[0])
-    out=[[0j for _ in range(rows)] for _ in range(cols)]
-    for i in range(rows):
-        for j in range(cols):
-            out[j][i]=H[i][j].conjugate()
-    return out
-
-def _matmul(A,B):
-    if not A or not B:return []
-    m=len(A); n=len(B); k=len(B[0])
-    out=[[0j for _ in range(k)] for _ in range(m)]
-    for i in range(m):
-        for p in range(n):
-            ap=A[i][p]
-            for j in range(k):
-                out[i][j]+=ap*B[p][j]
-    return out
-
-def _invert_matrix(A):
-    n=len(A)
-    M=[list(row)+[1+0j if i==j else 0j for j in range(n)] for i,row in enumerate(A)]
-    for col in range(n):
-        pivot=max(range(col,n),key=lambda r:abs(M[r][col]))
-        if abs(M[pivot][col])<1e-12:
-            M[pivot][col]+=1e-9
-        M[col],M[pivot]=M[pivot],M[col]
-        pv=M[col][col]
-        M[col]=[v/pv for v in M[col]]
-        for r in range(n):
-            if r==col: continue
-            f=M[r][col]
-            if abs(f)>0:
-                M[r]=[M[r][c]-f*M[col][c] for c in range(2*n)]
-    return [row[n:] for row in M]
-
-def _precoder(H, method="RZF", lam=0.1):
-    """
-    H: users x beams. Returns W: beams x users.
-    """
-    HH=_mat_h_hermitian(H)
-    if method.upper()=="MRT":
-        W=HH
-    else:
-        G=_matmul(H,HH)  # users x users
-        if method.upper()=="RZF":
-            for i in range(len(G)): G[i][i]+=lam
-        else: # ZF
-            for i in range(len(G)): G[i][i]+=1e-6
-        Ginv=_invert_matrix(G)
-        W=_matmul(HH,Ginv)
-    # column normalization
-    if W:
-        cols=len(W[0])
-        for j in range(cols):
-            norm=math.sqrt(sum(abs(W[i][j])**2 for i in range(len(W))))
-            if norm>0:
-                for i in range(len(W)): W[i][j]/=norm
-    return W
-
-def _sinr_from_precoder(H,W,desired_dbm,noise_dbm):
-    users=len(H)
-    if users==0:return []
-    HW=_matmul(H,W) # users x users
-    p0=10**((desired_dbm-30)/10)
-    noise=10**((noise_dbm-30)/10)
-    out=[]
-    for i in range(users):
-        sig=p0*abs(HW[i][i])**2
-        interf=sum(p0*abs(HW[i][j])**2 for j in range(users) if j!=i)
-        sinr=sig/max(noise+interf,1e-18)
-        out.append({
-            "user":i+1,
-            "signal_w":sig,
-            "interference_w":interf,
-            "sinr_db":10*log10(max(sinr,1e-18))
-        })
-    return out
-
 def _traffic_vector(users, pattern, hotspot):
     users=max(1,users)
     if pattern=="Uniform":
@@ -621,14 +494,19 @@ def _traffic_vector(users, pattern, hotspot):
     s=sum(v)
     return [x/s for x in v]
 
-def _beam_hopping_schedule(traffic, beams, timeslots, scheduler, duty):
+def _beam_hopping_schedule(traffic, beams, beam_assignment, timeslots, scheduler, duty):
     """
     Deterministic scheduler abstraction. Produces slot x beam activation map.
+    beam_assignment[i] is the beam actually serving traffic[i] (from real channel
+    geometry, i.e. argmax(|H|) per user) so beam_load reflects where the load truly
+    sits, matching the beam each user is credited against downstream.
     """
     beams=max(1,beams); timeslots=max(1,timeslots)
     beam_load=[0.0]*beams
     for i,t in enumerate(traffic):
-        beam_load[i%beams]+=t
+        b=int(beam_assignment[i]) if i<len(beam_assignment) else i%beams
+        if 0<=b<beams:
+            beam_load[b]+=t
     active_per_slot=max(1,int(round(beams*max(0.05,min(1.0,duty)))))
     sched=[]
     debt=[0.0]*beams
@@ -653,60 +531,6 @@ def _beam_hopping_schedule(traffic, beams, timeslots, scheduler, duty):
                 served[b]+=beam_load[b]
                 debt[b]=max(0.0,debt[b]-1.0/timeslots)
     return sched,beam_load
-
-def _qam_symbols(order, n):
-    m=int(math.sqrt(max(4,order)))
-    if m*m!=order:m=4
-    levels=[2*i-(m-1) for i in range(m)]
-    norm=math.sqrt((2/3)*(order-1)) if order>1 else 1
-    syms=[]
-    for k in range(n):
-        i=(7*k+3)%m
-        q=(11*k+1)%m
-        syms.append(complex(levels[i]/norm,levels[q]/norm))
-    return syms
-
-def _sampled_hpa_metrics(order, samples, papr_db, obo_db, p, guard_fraction):
-    """
-    Complex-baseband memoryless Rapp simulation.
-    EVM is computed against best-fit complex gain.
-    ACLR proxy is obtained from oversampled DFT bin energy outside the nominal occupied band.
-    """
-    import cmath
-    n=max(256,min(4096,samples))
-    base=_qam_symbols(order,n)
-    peak_scale=10**((papr_db-obo_db)/20)
-    xin=[z*peak_scale for z in base]
-    y=[]
-    for z in xin:
-        a=abs(z)
-        if a==0:y.append(0j);continue
-        ao=hpa_rapp_amplitude(a,1.0,p)
-        y.append(z/a*ao)
-    # best-fit complex gain
-    den=sum(abs(z)**2 for z in xin)
-    g=sum(y[i]*xin[i].conjugate() for i in range(n))/max(den,1e-18)
-    err=[y[i]-g*xin[i] for i in range(n)]
-    evm=100*math.sqrt(sum(abs(e)**2 for e in err)/max(sum(abs(g*z)**2 for z in xin),1e-18))
-
-    # lightweight DFT ACLR proxy using capped bins for runtime
-    N=min(512,n)
-    sig=y[:N]
-    spec=[]
-    for k in range(N):
-        s=0j
-        for t,z in enumerate(sig):
-            ang=-2*pi*k*t/N
-            s+=z*complex(math.cos(ang),math.sin(ang))
-        spec.append(abs(s)**2)
-    half=int(N*(1-max(0.05,min(.45,guard_fraction)))/2)
-    center=N//2
-    # shift zero frequency to center
-    spec_shift=spec[N//2:]+spec[:N//2]
-    main=sum(spec_shift[max(0,center-half):min(N,center+half)])
-    adj=sum(spec_shift[:max(0,center-half)])+sum(spec_shift[min(N,center+half):])
-    aclr=10*log10(max(main,1e-18)/max(adj,1e-18))
-    return {"evm_pct":evm,"aclr_proxy_db":aclr,"gain_mag":abs(g)}
 
 def hpa_rapp_amplitude(a_in,a_sat=1.0,p=3.0):
     p=max(.5,p)
@@ -1153,15 +977,18 @@ def payload(x:PayloadInput):
     if geometry and geometry["visible"]:
         H=np.asarray(geometry["H"],dtype=complex)
         W=_precoder_np(H,x.precoding_method,x.rzf_lambda) if x.precoding_enabled else _precoder_np(H,"MRT",0.0)
-        # traffic shares become stream-power weights for physically connected SINR
-        traffic=_traffic_vector(x.users,x.traffic_pattern,x.traffic_hotspot_factor)
+        # traffic shares become stream-power weights for physically connected SINR.
+        # Sized to H's actual row count, not the raw x.users: _region_user_grid caps the
+        # geometry grid at 64 users, so shaping the hotspot/edge-heavy curve over the
+        # uncapped count would center it past where any real user row exists.
+        traffic=_traffic_vector(H.shape[0],x.traffic_pattern,x.traffic_hotspot_factor)
         stream_weights=traffic[:W.shape[1]]
         sinr_rows=_sinr_np(H,W,x.geometry_total_tx_power_w,x.user_noise_dbm,stream_weights)
     else:
         H=np.asarray(_complex_channel_matrix(x.beams,x.users,x.cochannel_coupling_db),dtype=complex)
         W=_precoder_np(H,x.precoding_method,x.rzf_lambda) if x.precoding_enabled else _precoder_np(H,"MRT",0.0)
         sinr_rows=_sinr_np(H,W,x.geometry_total_tx_power_w,x.user_noise_dbm)
-        traffic=_traffic_vector(x.users,x.traffic_pattern,x.traffic_hotspot_factor)
+        traffic=_traffic_vector(H.shape[0],x.traffic_pattern,x.traffic_hotspot_factor)
     sinr_vals=[r["sinr_db"] for r in sinr_rows]
     mean_sinr=sum(sinr_vals)/len(sinr_vals) if sinr_vals else -99
     p5_sinr=sorted(sinr_vals)[max(0,int(.05*len(sinr_vals))-1)] if sinr_vals else -99
@@ -1169,8 +996,11 @@ def payload(x:PayloadInput):
     # H may carry fewer columns than x.beams when geometry resolves fewer beams than users;
     # the schedule must be built over H's actual beam count so scheduled indices stay in bounds.
     n_beams_actual=H.shape[1] if H.size else x.beams
-    schedule,beam_load=_beam_hopping_schedule(traffic,n_beams_actual,x.timeslots,x.scheduler,x.beam_hopping_duty)
+    # Real per-user serving beam from channel geometry, computed once and shared by the
+    # scheduler (so beam_load reflects where the traffic actually sits) and the physical
+    # throughput calc below (so "who is served when a beam fires" is the same answer).
     beam_assignment=np.argmax(np.abs(H),axis=1).astype(int) if H.size else np.zeros(len(traffic),dtype=int)
+    schedule,beam_load=_beam_hopping_schedule(traffic,n_beams_actual,beam_assignment,x.timeslots,x.scheduler,x.beam_hopping_duty)
     throughput=_schedule_throughput_physical(H,schedule,beam_assignment,traffic,x.bandwidth_mhz,
         x.geometry_total_tx_power_w,x.user_noise_dbm,x.precoding_method if x.precoding_enabled else "MRT",x.rzf_lambda,2.0)
 
@@ -1573,10 +1403,6 @@ def api_report_summary(x: IntegratedInput):
     ]
     return {"headline":"Space Deep Tech Center V0.6 Integrated Design Summary","bullets":bullets}
 
-
-
-import random
-from statistics import mean
 
 REGIONS = {
     "Korea": {"lat_deg": 36.3, "lon_deg": 127.8, "label": "Korea"},

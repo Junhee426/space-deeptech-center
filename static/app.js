@@ -368,21 +368,29 @@ async function runSensitivity(){
 }
 $("sen_run").onclick=withLoading($("sen_run"),runSensitivity);
 
-// Persistent scenario snapshot
+// Persistent scenario snapshot: every input/select inside the four lab parameter forms
+// is saved and restored by element id (checkboxes via .checked, everything else via
+// .value), instead of a hand-picked subset — so nothing a user tuned goes silently
+// missing on reload, and newly added fields stay covered without editing this list.
+const SCENARIO_SECTIONS=["satcom","beam","rad","payload"];
+function scenarioFields(){
+ return SCENARIO_SECTIONS.flatMap(id=>[...document.querySelectorAll(`#${id} input, #${id} select`)]);
+}
 function saveScenario(){
- localStorage.setItem("sdtc_v06_scenario",JSON.stringify({
-  global:{alt:$("g_alt").value,freq:$("g_freq").value,bw:$("g_bw").value,elem:$("g_elem").value,beams:$("g_beams").value},
-  sat:satObj(),beam:beamObj(),rad:radObj(),payload:payloadObj()
- }));
+ const global={alt:$("g_alt").value,freq:$("g_freq").value,bw:$("g_bw").value,elem:$("g_elem").value,beams:$("g_beams").value};
+ const fields={};
+ scenarioFields().forEach(el=>{ if(el.id) fields[el.id]=el.type==="checkbox"?el.checked:el.value });
+ localStorage.setItem("sdtc_v06_scenario",JSON.stringify({global,fields}));
 }
 function loadScenario(){
  const raw=localStorage.getItem("sdtc_v06_scenario"); if(!raw)return false;
  const s=JSON.parse(raw);
+ if(!s.global||!s.fields) return false;
  $("g_alt").value=s.global.alt;$("g_freq").value=s.global.freq;$("g_bw").value=s.global.bw;$("g_elem").value=s.global.elem;$("g_beams").value=s.global.beams;
- if(s.sat){$("s_material").value=s.sat.material;$("s_pa").value=s.sat.part_pa;$("s_lna").value=s.sat.part_lna;$("s_rf").value=s.sat.rf_output_w;$("s_tops").value=s.sat.processor_tops}
- if(s.beam){$("b_arch").value=s.beam.architecture;$("b_proc").value=s.beam.processor;$("b_tops").value=s.beam.available_tops;$("b_power").value=s.beam.available_power_w}
- if(s.rad){$("r_mit").value=s.rad.mitigation;$("r_shield").value=s.rad.shielding_mm_al}
- if(s.payload){$("p_arch").value=s.payload.architecture}
+ for(const id in s.fields){
+  const el=$(id); if(!el) continue;
+  if(el.type==="checkbox") el.checked=!!s.fields[id]; else el.value=s.fields[id];
+ }
  return true;
 }
 window.addEventListener("beforeunload",saveScenario);
