@@ -315,6 +315,24 @@ def _offaxis_angle_deg(sat_xyz, target_xyz, beam_center_xyz):
     dot=np.sum(a*b,axis=-1)/(np.maximum(an*bn,1e-18))
     return np.degrees(np.arccos(np.clip(dot,-1,1)))
 
+def _user_elevation_deg_np(sat_xyz, user_xyz):
+    """
+    Elevation angle(s) at which each user observes a single satellite above its
+    local horizon: the angle between the user->satellite line of sight and the
+    user's local zenith direction. This must be measured along the user->satellite
+    vector (sat_xyz - user_xyz); using the reversed satellite->user vector flips
+    the sign of every result (e.g. a satellite directly overhead would read as
+    -90 deg instead of the correct +90 deg).
+    Returns (elevation_deg, slant_range_km), both shape (n_users,).
+    """
+    sat_xyz=np.asarray(sat_xyz,dtype=float)
+    user_xyz=np.asarray(user_xyz,dtype=float)
+    los=sat_xyz[None,:]-user_xyz
+    ranges=np.linalg.norm(los,axis=1)
+    ground_norm=user_xyz/np.linalg.norm(user_xyz,axis=1)[:,None]
+    elev=np.degrees(np.arcsin(np.clip(np.sum(los*ground_norm,axis=1)/np.maximum(ranges,1e-12),-1,1)))
+    return elev,ranges
+
 def _geometry_channel_matrix(x):
     """
     Builds a complex H[user,beam] from actual Walker satellite geometry,
@@ -333,7 +351,8 @@ def _geometry_channel_matrix(x):
         return {
             "H":np.zeros((len(users),max(1,x.beams)),dtype=complex),
             "users":users,"satellite_indices":[],"user_elevation_deg":[-90.0]*len(users),
-            "user_range_km":[None]*len(users),"beam_centers":users[:max(1,min(x.beams,len(users)))],
+            "user_range_km":[None]*len(users),"user_visible":[False]*len(users),
+            "beam_centers":users[:max(1,min(x.beams,len(users)))],
             "visible":False
         }
 
@@ -341,10 +360,11 @@ def _geometry_channel_matrix(x):
     # Current payload applies one common precoder; use the highest-elevation serving satellite.
     sat=sats[selected[0]]
 
-    los=user_xyz-sat[None,:]
-    ranges=np.linalg.norm(los,axis=1)
-    ground_norm=user_xyz/np.linalg.norm(user_xyz,axis=1)[:,None]
-    elev=np.degrees(np.arcsin(np.clip(np.sum(los*ground_norm,axis=1)/np.maximum(ranges,1e-12),-1,1)))
+    elev,ranges=_user_elevation_deg_np(sat,user_xyz)
+
+    # Per-user visibility mask: a user below the configured minimum elevation cannot
+    # actually see the serving satellite, even when the region anchor point can.
+    user_visible=elev>=float(x.geometry_min_elevation_deg)
 
     # Beam centers follow highest-traffic users later; initial deterministic centers uniformly sample users.
     b=max(1,min(int(x.beams),len(users)))
@@ -365,9 +385,14 @@ def _geometry_channel_matrix(x):
         phase=np.exp(-1j*2*pi*(ranges*1000)/lam)
         H[:,j]=np.sqrt(gt*gr/fixed_loss)*fs_amp*phase
 
+    # A non-visible user must not receive any channel energy derived from a
+    # satellite it cannot actually see, regardless of the off-axis beam math above.
+    H[~user_visible,:]=0.0
+
     return {
         "H":H,"users":users,"satellite_indices":[int(v) for v in selected],
         "user_elevation_deg":elev.tolist(),"user_range_km":ranges.tolist(),
+        "user_visible":user_visible.tolist(),
         "beam_center_indices":center_indices.tolist(),
         "beam_centers":[users[i] for i in center_indices],
         "visible":True
@@ -504,6 +529,12 @@ def _schedule_throughput_physical(H, schedule, beam_assignment, traffic, bandwid
         slot_sinr.append(float(np.mean(sinrs)) if len(sinrs) else -99.0)
 
     user_avg=user_acc/max(1,len(schedule))
+    # A user whose channel row is identically zero (masked out as non-visible, or never
+    # scheduled) must show exactly 0 Mbps. The SINR/log2 chain above floors SINR at a
+    # small positive epsilon to avoid log(0), which otherwise leaves a non-zero but
+    # numerically meaningless residual (~1e-30) instead of a true zero.
+    no_channel=np.all(np.abs(H)**2==0,axis=1)
+    user_avg=np.where(no_channel,0.0,user_avg)
     return {"aggregate_gbps":float(user_avg.sum()/1000),"user_mbps":user_avg.tolist(),
             "slot_mbps":slot_rates,"slot_mean_sinr_db":slot_sinr}
 
@@ -1226,6 +1257,7 @@ def payload(x:PayloadInput):
           "users":[{"lat":round(v[0],5),"lon":round(v[1],5)} for v in (geometry["users"] if geometry else [])],
           "user_elevation_deg":[round(v,3) for v in (geometry["user_elevation_deg"] if geometry else [])],
           "user_range_km":[round(v,3) if v is not None else None for v in (geometry["user_range_km"] if geometry else [])],
+          "user_visible":[bool(v) for v in (geometry.get("user_visible",[]) if geometry else [])],
           "beam_centers":[{"lat":round(v[0],5),"lon":round(v[1],5)} for v in (geometry["beam_centers"] if geometry else [])],
           "channel_source":"Walker geometry + range + phase + Gaussian beam pattern" if geometry and geometry["visible"] else "synthetic fallback"
       },
