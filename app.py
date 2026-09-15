@@ -5,10 +5,11 @@ from fastapi.templating import Jinja2Templates
 from api.routes import router
 from simulation.batch import TooManyConcurrentJobsError
 from orbit.walker import WalkerComputationTooLargeError
+from core.engine import APP_VERSION
 
 app=FastAPI(
     title="Space Deep Tech Center",
-    version="0.6.0",
+    version=APP_VERSION,
     description="Physics-grounded satellite deep-tech engineering center"
 )
 app.mount("/static",StaticFiles(directory="static"),name="static")

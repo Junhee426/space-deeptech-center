@@ -11,7 +11,14 @@ from functools import lru_cache
 
 from simulation.batch import batched_design_grid, parallel_map, monte_carlo_draws, job_slot, TooManyConcurrentJobsError
 from simulation.workers import optimize_case_worker, monte_carlo_case_worker
-from orbit.walker import walker_positions_times, regional_visibility_times, regional_visibility_times_multi
+from orbit.walker import walker_positions_times, regional_visibility_times, regional_visibility_times_multi, elevation_matrix
+
+# Single source of truth for the reported application version. app.py and
+# api/routes.py both import this instead of hardcoding their own copy, so the
+# FastAPI app metadata, /api/health, /api/architecture and /api/performance
+# can no longer drift out of sync with each other (they previously reported a
+# mix of "0.6.0" and a stale "0.5.0").
+APP_VERSION = "0.6.0"
 
 # Physics core constants (SI unless noted)
 R_EARTH = 6371.0              # mean spherical Earth radius [km]
@@ -291,10 +298,10 @@ def _visible_satellites_np(region, altitude_km, inclination_deg, planes, sats_pe
     # quantize cached state to 1 sec
     t_s=int(round(time_min*60.0))
     sats=np.asarray(_walker_ecef_cached(round(altitude_km,6),round(inclination_deg,6),int(planes),int(sats_per_plane),int(walker_f),t_s),dtype=float)
-    los=sats-ground[None,:]
-    rng=np.linalg.norm(los,axis=1)
-    sinel=(los@zenith)/np.maximum(rng,1e-12)
-    elev=np.degrees(np.arcsin(np.clip(sinel,-1,1)))
+    # Same elevation/range formula as orbit.walker.elevation_matrix (reused here
+    # instead of a second inline copy) and _user_elevation_deg_np (the
+    # per-user-vs-one-satellite direction of the same physics).
+    elev,rng=elevation_matrix(sats,ground,zenith)
     idx=np.where(elev>=min_elev_deg)[0]
     return sats,idx,elev,rng
 
@@ -1866,31 +1873,15 @@ class MonteCarloInput(ValidatedModel):
     max_mass_kg: float = Field(500,gt=0)
 
 def _walker_satellite_positions_ecef(x: CoverageInput, t_s: float):
-    a=R_EARTH+x.altitude_km
-    inc=radians(x.inclination_deg)
-    n=sqrt(MU_EARTH/a**3)
-    theta_e=OMEGA_EARTH*t_s
-    total=max(1,x.planes*x.sats_per_plane)
-    f=x.walker_f % max(1,x.planes)
-    out=[]
-    for p in range(x.planes):
-        raan=2*pi*p/x.planes
-        for s in range(x.sats_per_plane):
-            u0=2*pi*(s/x.sats_per_plane + f*p/total)
-            u=u0+n*t_s
-            cu,su=cos(u),sin(u)
-            cO,sO=cos(raan),sin(raan)
-            ci,si=cos(inc),sin(inc)
-            # ECI for circular orbit: R3(Ω)R1(i)[a cos u, a sin u, 0]
-            xeci=a*(cO*cu-sO*su*ci)
-            yeci=a*(sO*cu+cO*su*ci)
-            zeci=a*(su*si)
-            # ECI -> ECEF through Earth rotation
-            ct,st=cos(theta_e),sin(theta_e)
-            xe=ct*xeci+st*yeci
-            ye=-st*xeci+ct*yeci
-            out.append((xe,ye,zeci))
-    return out
+    """
+    Single-time-step Walker ECEF positions. Delegates to orbit.walker's
+    vectorized propagation (verified bit-for-bit identical to the pure-Python
+    per-satellite loop this used to duplicate) instead of re-implementing the
+    same RAAN / inclination / mean-motion / Earth-rotation formula a second time.
+    """
+    return walker_positions_times(
+        x.altitude_km,x.inclination_deg,x.planes,x.sats_per_plane,x.walker_f,np.array([float(t_s)])
+    )[0]
 
 def _ground_ecef(lat_deg: float, lon_deg: float):
     lat,lon=radians(lat_deg),radians(lon_deg)
@@ -1905,15 +1896,6 @@ def _elevation_deg(sat, ground, zenith):
     sinel=(dx*zenith[0]+dy*zenith[1]+dz*zenith[2])/rng
     return degrees(math.asin(max(-1.0,min(1.0,sinel))))
 
-def _longest_outage_sec(ok_series, step_s):
-    if not ok_series:return 0.0
-    longest=cur=0
-    for ok in ok_series:
-        if ok: cur=0
-        else:
-            cur+=1
-            longest=max(longest,cur)
-    return longest*step_s
 
 def _longest_outage_duration_s(times, ok):
     """
@@ -2170,7 +2152,7 @@ def api_physics_registry():
 
 def api_performance():
     return {
-        "version":"0.5.0",
+        "version":APP_VERSION,
         "caches":{
             "walker":_walker_ecef_cached.cache_info()._asdict(),
             "slant":_cached_slant_range.cache_info()._asdict(),
@@ -2181,10 +2163,8 @@ def api_performance():
         },
         "modes":{
             "interactive_payload":"Full",
-            "optimizer":"Fast + geometry fallback disabled",
-            "monte_carlo":"Fast + geometry fallback disabled",
-            "sensitivity":"Fast + geometry fallback disabled"
+            "optimizer":"Fast (no per-user geometry/visibility masking)",
+            "monte_carlo":"Fast (no per-user geometry/visibility masking)",
+            "sensitivity":"Fast (no per-user geometry/visibility masking)"
         }
     }
-
-def health(): return {"status":"ok","version":"0.5.0","labs":9}
