@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from enum import Enum
 from math import log10, log2, sqrt, cos, acos, sin, radians, degrees, pi
 from io import StringIO
 import csv
@@ -831,14 +832,157 @@ def solve_poisson_1d(x):
         "assumption":"1D uniform net ionized dopant charge; mobile-carrier Poisson-Boltzmann coupling is not included."
     }
 
-class SatcomInput(BaseModel):
-    material:str="GaN"
+class ValidatedModel(BaseModel):
+    """
+    Base for every API input model.
+
+    - Rejects non-finite floats (NaN / Infinity) on any field.
+    - Re-validates on model_copy(update=...): pydantic's model_copy intentionally
+      skips validation even when validate_assignment=True (it does not go through
+      __setattr__ or the constructor), so a value pushed through model_copy could
+      otherwise silently bypass every constraint/enum/cross-field check below. The
+      codebase updates these models almost exclusively via model_copy(update=...)
+      (propagating shared mission parameters between satcom/beam/payload/radiation),
+      so without this override those checks would only ever fire once, at the very
+      first construction of a default-valued model.
+    - validate_assignment=True additionally re-validates plain `model.field = value`
+      assignment, for any code path that mutates a model in place.
+    """
+    # validate_default=True: field defaults given as plain string literals (e.g.
+    # architecture:PayloadArchitecture="Regenerative") are otherwise stored as raw
+    # strings rather than being coerced into their Enum type until something else
+    # touches the field, which shows up as serializer warnings and would let a
+    # default silently skip a field_validator/model_validator.
+    model_config = ConfigDict(validate_assignment=True, validate_default=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _reject_non_finite(cls, v):
+        if isinstance(v, float) and not math.isfinite(v):
+            raise ValueError("must be a finite number; NaN and Infinity are not allowed")
+        return v
+
+    def model_copy(self, *, update=None, deep=False):
+        copied = super().model_copy(update=update, deep=deep)
+        # Re-validate from the raw field values (copied.__dict__), not
+        # copied.model_dump(): model_dump() runs pydantic's serializer over the
+        # not-yet-(re)validated copy, which emits spurious
+        # "Expected `enum` ... input_type=str" warnings whenever `update` supplied
+        # a plain string for an Enum field (which is otherwise perfectly valid
+        # input). Going through model_validate() on the raw values still runs
+        # every field/model validator exactly the same.
+        return type(self).model_validate(dict(copied.__dict__))
+
+
+class Material(str, Enum):
+    SI = "Si"
+    SIGE = "SiGe"
+    GAAS = "GaAs"
+    GAN = "GaN"
+    SIC = "SiC"
+
+class ProcessorType(str, Enum):
+    FPGA = "FPGA"
+    ASIC = "ASIC"
+
+class BeamArchitecture(str, Enum):
+    ANALOG = "Analog"
+    HYBRID = "Hybrid"
+    FULLY_DIGITAL = "Fully Digital"
+
+class PayloadArchitecture(str, Enum):
+    BENT_PIPE = "Bent-Pipe"
+    REGENERATIVE = "Regenerative"
+    FLEXIBLE_DIGITAL = "Flexible Digital"
+
+class Mitigation(str, Enum):
+    NONE = "None"
+    ECC = "ECC"
+    TMR = "TMR"
+    TMR_SCRUB = "TMR+Scrub"
+
+class HpaModel(str, Enum):
+    RAPP = "Rapp"
+
+class PrecodingMethod(str, Enum):
+    RZF = "RZF"
+    MRT = "MRT"
+    ZF = "ZF"
+
+class TrafficPattern(str, Enum):
+    UNIFORM = "Uniform"
+    EDGE_HEAVY = "Edge-heavy"
+    HOTSPOT = "Hotspot"
+
+class SchedulerType(str, Enum):
+    ROUND_ROBIN = "Round Robin"
+    MAX_CI = "Max C/I"
+    PROPORTIONAL_FAIR = "Proportional Fair"
+
+class RegenerativeStack(str, Enum):
+    PHY = "PHY"
+    PHY_MAC = "PHY+MAC"
+    GNB_DU = "gNB-DU"
+    GNB_FULL = "gNB Full"
+
+class Polarization(str, Enum):
+    CIRCULAR = "Circular"
+    VERTICAL = "Vertical"
+    HORIZONTAL = "Horizontal"
+    LINEAR = "Linear"
+
+class PoissonModelType(str, Enum):
+    DEPLETION = "Depletion"
+    POISSON_BOLTZMANN = "Poisson-Boltzmann"
+    NONLINEAR = "Nonlinear"
+
+class OptimizeObjective(str, Enum):
+    BALANCED = "Balanced"
+    LOWEST_COST = "Lowest Cost"
+    HIGHEST_CAPACITY = "Highest Capacity"
+    LOWEST_MASS = "Lowest Mass"
+
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+class SensitivityParameter(str, Enum):
+    RF_OUTPUT_W = "rf_output_w"
+    BANDWIDTH_MHZ = "bandwidth_mhz"
+    BEAMS = "beams"
+    ELEMENTS = "elements"
+    ALTITUDE_KM = "altitude_km"
+    SHIELDING_MM_AL = "shielding_mm_al"
+
+class RegionName(str, Enum):
+    KOREA = "Korea"
+    UAE = "UAE"
+    SOUTHEAST_ASIA = "Southeast Asia"
+
+class AnalysisMode(str, Enum):
+    FULL = "Full"
+    FAST = "Fast"
+
+# Plausible RF band bounds and valid orbital altitude range shared by every model
+# that carries a frequency or altitude field. These are deliberately generous
+# (they must not reject any legitimate satcom/deep-tech scenario) while still
+# catching physically nonsensical input (0 Hz, negative altitude, a "GHz" value
+# that is actually in Hz, an altitude below the Karman line or beyond a
+# reasonable super-GEO/graveyard orbit).
+FREQ_GHZ_MIN=0.1
+FREQ_GHZ_MAX=300.0
+ALTITUDE_KM_MIN=160.0
+ALTITUDE_KM_MAX=40000.0
+
+class SatcomInput(ValidatedModel):
+    material:Material="GaN"
     part_pa:str="PA-GaN-Ka-20W"
     part_lna:str="LNA-GaAs-Ka"
-    altitude_km:float=1280
-    min_elevation_deg:float=20
-    frequency_ghz:float=20
-    bandwidth_mhz:float=100
+    altitude_km:float=Field(1280,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    min_elevation_deg:float=Field(20,ge=0,le=90)
+    frequency_ghz:float=Field(20,gt=0,ge=FREQ_GHZ_MIN,le=FREQ_GHZ_MAX)
+    bandwidth_mhz:float=Field(100,gt=0)
     rf_output_w:float=20
     tx_gain_dbi:float=34
     rx_gain_dbi:float=42
@@ -855,7 +999,7 @@ class SatcomInput(BaseModel):
     mission_years:float=5
     array_elements:int=256
     beams:int=8
-    processor:str="FPGA"
+    processor:ProcessorType="FPGA"
     processor_tops:float=1.5
     coding_gap_db:float=2.0
     max_spectral_eff:float=6.0
@@ -864,14 +1008,14 @@ class SatcomInput(BaseModel):
     radiator_emissivity:float=0.85
     radiator_view_factor:float=0.80
 
-class BeamInput(BaseModel):
+class BeamInput(ValidatedModel):
     elements:int=256
     beams:int=8
-    bandwidth_mhz:float=100
+    bandwidth_mhz:float=Field(100,gt=0)
     sample_gsps:float=1.0
     bits:int=12
-    architecture:str="Fully Digital"
-    processor:str="FPGA"
+    architecture:BeamArchitecture="Fully Digital"
+    processor:ProcessorType="FPGA"
     available_tops:float=2.0
     available_power_w:float=180
     phase_bits:int=6
@@ -880,7 +1024,7 @@ class BeamInput(BaseModel):
     element_spacing_lambda:float=.5
     max_scan_deg:float=60.0
 
-class RadInput(BaseModel):
+class RadInput(ValidatedModel):
     mission_years:float=5
     shielding_mm_al:float=2
     tid_env_krad_yr:float=2
@@ -890,15 +1034,15 @@ class RadInput(BaseModel):
     seu_rate_device_day:float=.002
     sel_rate_device_day:float=.00002
     sensitive_devices:int=25
-    mitigation:str="TMR+Scrub"
+    mitigation:Mitigation="TMR+Scrub"
     scrub_interval_min:float=10
     spares:int=1
     reset_recovery_sec:float=5
     service_nodes:int=128
 
-class PayloadInput(BaseModel):
-    architecture:str="Regenerative"
-    frequency_ghz:float=20
+class PayloadInput(ValidatedModel):
+    architecture:PayloadArchitecture="Regenerative"
+    frequency_ghz:float=Field(20,gt=0,ge=FREQ_GHZ_MIN,le=FREQ_GHZ_MAX)
     bandwidth_mhz:float=500
     input_power_dbw:float=-115
     antenna_gain_rx_dbi:float=35
@@ -924,7 +1068,7 @@ class PayloadInput(BaseModel):
     radiator_view_factor:float=0.80
     papr_db:float=8.0
     output_backoff_db:float=3.0
-    hpa_model:str="Rapp"
+    hpa_model:HpaModel="Rapp"
     rapp_p:float=3.0
     dpd_enabled:bool=True
     dpd_gain_db:float=2.0
@@ -936,38 +1080,53 @@ class PayloadInput(BaseModel):
     channelizer_granularity_mhz:float=5.0
     routing_matrix_inputs:int=8
     routing_matrix_outputs:int=8
-    regenerative_stack:str="PHY"
+    regenerative_stack:RegenerativeStack="PHY"
     isl_offload_fraction:float=0.0
     # V1.1 interference / traffic / waveform
     users:int=16
     user_noise_dbm:float=-100.0
     desired_signal_dbm:float=-80.0
     cochannel_coupling_db:float=-18.0
-    precoding_method:str="RZF"
+    precoding_method:PrecodingMethod="RZF"
     rzf_lambda:float=0.1
-    traffic_pattern:str="Hotspot"
-    scheduler:str="Proportional Fair"
+    traffic_pattern:TrafficPattern="Hotspot"
+    scheduler:SchedulerType="Proportional Fair"
     timeslots:int=16
     hpa_samples:int=2048
     modulation_order:int=16
     aclr_guard_fraction:float=0.15
     # V1.2 geometry-resolved channel
     geometry_channel_enabled:bool=True
-    geometry_region:str="Korea"
+    geometry_region:RegionName="Korea"
     geometry_time_min:float=0.0
     geometry_user_radius_km:float=250.0
     geometry_satellite_count:int=1
-    geometry_inclination_deg:float=42.0
-    geometry_planes:int=16
-    geometry_sats_per_plane:int=8
-    geometry_walker_f:int=1
-    geometry_altitude_km:float=1280.0
-    geometry_min_elevation_deg:float=10.0
+    geometry_inclination_deg:float=Field(42.0,ge=0,le=180)
+    geometry_planes:int=Field(16,ge=1,le=60)
+    geometry_sats_per_plane:int=Field(8,ge=1,le=60)
+    geometry_walker_f:int=Field(1,ge=0)
+    geometry_altitude_km:float=Field(1280.0,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    geometry_min_elevation_deg:float=Field(10.0,ge=0,le=90)
     geometry_terminal_gain_dbi:float=32.0
     geometry_beam_hpbw_deg:float=2.5
     geometry_atmospheric_loss_db:float=1.0
     geometry_total_tx_power_w:float=40.0
-    analysis_mode:str="Full"
+    analysis_mode:AnalysisMode="Full"
+
+    @model_validator(mode="after")
+    def _check_walker_phasing_feasible(self):
+        # Walker Delta-pattern phasing convention: F (walker_f) must satisfy
+        # 0 <= F < planes, otherwise the constellation phasing is not well-defined
+        # for the given plane count. The propagation code used to silently wrap
+        # an out-of-range F via `% planes`; that hides a genuinely invalid input
+        # (e.g. F equal to or larger than planes) instead of rejecting it.
+        if self.geometry_walker_f >= self.geometry_planes:
+            raise ValueError(
+                f"geometry_walker_f ({self.geometry_walker_f}) must be less than "
+                f"geometry_planes ({self.geometry_planes}) for a valid Walker "
+                "Delta-pattern phasing (0 <= F < planes)"
+            )
+        return self
 
 
 def satcom(x:SatcomInput):
@@ -1285,40 +1444,56 @@ def payload(x:PayloadInput):
       ] if w]
     }
 
-class PropagationInput(BaseModel):
-    frequency_ghz: float = 20.0
-    elevation_deg: float = 30.0
-    rain_rate_mm_h: float = 25.0
-    polarization: str = "Circular"
-    polarization_tilt_deg: float = 45.0
-    rain_height_km: float = 5.0
-    station_height_km: float = 0.1
-    path_reduction_factor: float = 1.0
+class PropagationInput(ValidatedModel):
+    frequency_ghz: float = Field(20.0,gt=0,ge=FREQ_GHZ_MIN,le=FREQ_GHZ_MAX)
+    elevation_deg: float = Field(30.0,ge=0,le=90)
+    rain_rate_mm_h: float = Field(25.0,ge=0)
+    polarization: Polarization = "Circular"
+    polarization_tilt_deg: float = Field(45.0,ge=0,le=180)
+    rain_height_km: float = Field(5.0,ge=0)
+    station_height_km: float = Field(0.1,ge=0)
+    path_reduction_factor: float = Field(1.0,ge=0,le=1)
 
-class PassTimelineInput(BaseModel):
-    altitude_km: float = 1280
-    inclination_deg: float = 42
+class PassTimelineInput(ValidatedModel):
+    altitude_km: float = Field(1280,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    inclination_deg: float = Field(42,ge=0,le=180)
     planes: int = Field(16, ge=1, le=60)
     sats_per_plane: int = Field(8, ge=1, le=60)
-    walker_f: int = 1
-    region: str = "Korea"
-    min_elevation_deg: float = 20
+    walker_f: int = Field(1,ge=0)
+    region: RegionName = "Korea"
+    min_elevation_deg: float = Field(20,ge=0,le=90)
     duration_hours: float = Field(6, ge=0.01, le=72)
     time_step_sec: float = Field(60, ge=5, le=3600)
 
-class PoissonDeviceInput(BaseModel):
-    thickness_um: float = 1.0
+    @model_validator(mode="after")
+    def _check_walker_phasing_feasible(self):
+        if self.walker_f >= self.planes:
+            raise ValueError(
+                f"walker_f ({self.walker_f}) must be less than planes ({self.planes}) "
+                "for a valid Walker Delta-pattern phasing (0 <= F < planes)"
+            )
+        return self
+
+class PoissonDeviceInput(ValidatedModel):
+    thickness_um: float = Field(1.0,gt=0)
     net_doping_cm3: float = 1e15
-    relative_permittivity: float = 11.7
+    relative_permittivity: float = Field(11.7,gt=0)
     left_potential_v: float = 0.0
     right_potential_v: float = 0.5
-    grid_points: int = 121
-    model: str = "Depletion"
-    temperature_k: float = 300.0
-    intrinsic_cm3: float = 1.0e10
-    carrier_sign: int = 1
-    max_iterations: int = 80
-    tolerance_v: float = 1e-7
+    grid_points: int = Field(121,ge=3,le=100000)
+    model: PoissonModelType = "Depletion"
+    temperature_k: float = Field(300.0,gt=0)
+    intrinsic_cm3: float = Field(1.0e10,gt=0)
+    carrier_sign: int = Field(1,ge=-1,le=1)
+    max_iterations: int = Field(80,ge=1,le=100000)
+    tolerance_v: float = Field(1e-7,gt=0)
+
+    @field_validator("carrier_sign")
+    @classmethod
+    def _carrier_sign_nonzero(cls, v):
+        if v == 0:
+            raise ValueError("carrier_sign must be -1 or 1 (0 is not a valid carrier sign)")
+        return v
 
 def api_satcom(x:SatcomInput): return satcom(x)
 
@@ -1347,7 +1522,7 @@ def mat_sweep(x:SatcomInput):
 
 
 
-class IntegratedInput(BaseModel):
+class IntegratedInput(ValidatedModel):
     satcom: SatcomInput = SatcomInput()
     beam: BeamInput = BeamInput()
     radiation: RadInput = RadInput()
@@ -1459,23 +1634,29 @@ def api_integrated(x: IntegratedInput):
 
 
 
-class OptimizeInput(BaseModel):
+class OptimizeInput(ValidatedModel):
     base: IntegratedInput = IntegratedInput()
-    max_total_mass_kg: float = 500
-    max_payload_power_w: float = 1200
-    min_effective_capacity_gbps: float = 2.0
-    min_effective_beams: int = 4
-    min_availability_pct: float = 99.9
-    max_cost_musd: float = 100
-    allowed_risk: str = "MEDIUM"
-    objective: str = "Balanced"
+    max_total_mass_kg: float = Field(500,gt=0)
+    max_payload_power_w: float = Field(1200,gt=0)
+    min_effective_capacity_gbps: float = Field(2.0,ge=0)
+    min_effective_beams: int = Field(4,ge=0)
+    min_availability_pct: float = Field(99.9,ge=0,le=100)
+    max_cost_musd: float = Field(100,gt=0)
+    allowed_risk: RiskLevel = "MEDIUM"
+    objective: OptimizeObjective = "Balanced"
 
-class SensitivityInput(BaseModel):
+class SensitivityInput(ValidatedModel):
     base: IntegratedInput = IntegratedInput()
-    parameter: str = "rf_output_w"
+    parameter: SensitivityParameter = "rf_output_w"
     low: float = 10
     high: float = 40
-    steps: int = 7
+    steps: int = Field(7,ge=3,le=25)
+
+    @model_validator(mode="after")
+    def _check_range_order(self):
+        if not (self.low < self.high):
+            raise ValueError(f"low ({self.low}) must be less than high ({self.high})")
+        return self
 
 def integrated_calc(x: IntegratedInput):
     s = satcom(x.satcom)
@@ -1631,33 +1812,42 @@ REGIONS = {
     "Southeast Asia": {"lat_deg": 10.0, "lon_deg": 106.8, "label": "Southeast Asia"},
 }
 
-class CoverageInput(BaseModel):
-    altitude_km: float = 1280
-    inclination_deg: float = 42
+class CoverageInput(ValidatedModel):
+    altitude_km: float = Field(1280,ge=ALTITUDE_KM_MIN,le=ALTITUDE_KM_MAX)
+    inclination_deg: float = Field(42,ge=0,le=180)
     planes: int = Field(16, ge=1, le=60)
     sats_per_plane: int = Field(8, ge=1, le=60)
-    min_elevation_deg: float = 20
-    target_min_visible: int = 1
-    walker_f: int = 1
+    min_elevation_deg: float = Field(20,ge=0,le=90)
+    target_min_visible: int = Field(1,ge=1)
+    walker_f: int = Field(1,ge=0)
     duration_hours: float = Field(24, ge=0.01, le=168)
     time_step_sec: float = Field(120, ge=5, le=3600)
 
-class MonteCarloInput(BaseModel):
+    @model_validator(mode="after")
+    def _check_walker_phasing_feasible(self):
+        if self.walker_f >= self.planes:
+            raise ValueError(
+                f"walker_f ({self.walker_f}) must be less than planes ({self.planes}) "
+                "for a valid Walker Delta-pattern phasing (0 <= F < planes)"
+            )
+        return self
+
+class MonteCarloInput(ValidatedModel):
     base: IntegratedInput = IntegratedInput()
     runs: int = Field(500, ge=1, le=5000)
     seed: int = 42
-    rf_output_sigma_pct: float = 5
-    pa_eff_sigma_pct: float = 6
-    loss_sigma_db: float = 0.8
-    bandwidth_sigma_pct: float = 5
-    processor_tops_sigma_pct: float = 8
-    tid_sigma_pct: float = 20
-    seu_sigma_pct: float = 25
-    mass_sigma_pct: float = 4
-    cost_sigma_pct: float = 8
-    capacity_threshold_gbps: float = 2.0
-    max_power_w: float = 1200
-    max_mass_kg: float = 500
+    rf_output_sigma_pct: float = Field(5,ge=0)
+    pa_eff_sigma_pct: float = Field(6,ge=0)
+    loss_sigma_db: float = Field(0.8,ge=0)
+    bandwidth_sigma_pct: float = Field(5,ge=0)
+    processor_tops_sigma_pct: float = Field(8,ge=0)
+    tid_sigma_pct: float = Field(20,ge=0)
+    seu_sigma_pct: float = Field(25,ge=0)
+    mass_sigma_pct: float = Field(4,ge=0)
+    cost_sigma_pct: float = Field(8,ge=0)
+    capacity_threshold_gbps: float = Field(2.0,ge=0)
+    max_power_w: float = Field(1200,gt=0)
+    max_mass_kg: float = Field(500,gt=0)
 
 def _walker_satellite_positions_ecef(x: CoverageInput, t_s: float):
     a=R_EARTH+x.altitude_km
