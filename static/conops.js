@@ -23,19 +23,26 @@ function conopsSpacecraft(m,mini=false){
  const id=name=>mini?'':`id="${name}"`;
  let antennas='';
  for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b*.5+(n%6)*b*.2}" cy="${-12+(Math.floor(n/6)+.5)*24/rows}" r="1.6" fill="#f5d287"/>`;
+ // The two wings share one bus-mounted yoke, so the right wing uses the mirror
+ // of the left wing's shear (b,c negated) to stay a true reflection, not a
+ // second copy of the same lean.
+ const boomY=-.18*(b+16)-8;
  return `<g ${id('conopsSatellite')}>
   <g transform="matrix(1 .18 -.55 .72 0 -8)" stroke="#6bbed8" stroke-width="1">
-   <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
+   <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
    <rect ${id('conopsSolar')} x="${-b-w-16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
-   <rect x="${b+16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
-   <path d="M${-b-16} 0 H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
   </g>
+  <g transform="matrix(1 -.18 .55 .72 0 -8)" stroke="#6bbed8" stroke-width="1">
+   <path d="M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
+   <rect x="${b+16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
+  </g>
+  <path d="M${-b-16} ${boomY} H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
   <rect ${id('conopsBody')} x="${-b}" y="${-b*.75}" width="${b*2}" height="${b*1.35}" rx="2" fill="url(#conopsGold)" stroke="#d3b976"/>
   <path d="M${b} ${-b*.75} L${b+24} ${-b*.75+20} V${b*.6+20} L${b} ${b*.6}Z" fill="#775b33" stroke="#d3b976"/>
   <path d="M${-b} ${b*.6} H${b} L${b+24} ${b*.6+20} H${-b+24}Z" fill="#52616a" stroke="#b7cbd1"/>
   <path d="M${-b+4} ${-b*.75+4} L${b-4} ${b*.6-4} M${b-4} ${-b*.75+4} L${-b+4} ${b*.6-4}" stroke="#fff0bf" stroke-opacity=".24"/>
   <g transform="translate(${b+18} ${b*.6-10}) skewY(-34)"><rect ${id('conopsRadiator')} width="${r}" height="26" fill="#c8dce5" stroke="#fff"/>${Array.from({length:5},(_,i)=>`<path d="M2 ${4+i*4} H${r-2}" stroke="#799fb5"/>`).join('')}</g>
-  <path d="M-8 ${-b*.75+3} V${-b*.75-22} M-16 ${-b*.75-18} H0" stroke="#d7e9f1" stroke-width="2"/>
+  <path d="M-8 ${-b*.75+3} V${-b*.75-24}" stroke="#d7e9f1" stroke-width="2"/><circle cx="-8" cy="${-b*.75-24}" r="3" fill="#d7e9f1"/>
   <circle cx="${b*.4}" cy="${-b*.75+10}" r="5" fill="#0c2845" stroke="#acccdb"/>
   <path d="M${-b*.6} ${b*.5} L${reflector.x} ${reflector.y-10}" stroke="#b5cbd4" stroke-width="4"/>
   <g ${id('conopsReflector')} transform="translate(${reflector.x} ${reflector.y}) rotate(32)"><path d="M${-dish} 0 Q0 ${-dish*1.45} ${dish} 0" fill="url(#conopsMetal)" stroke="#b5d9e6"/><ellipse rx="${dish}" ry="${dish*.34}" fill="#274d62" stroke="#cae6f0"/><path d="M${-dish} 0 L0 ${dish*.8} L${dish} 0 M0 0 V${dish*.8}" stroke="#e7d3a0" fill="none"/><circle cy="${dish*.8}" r="2.5" fill="#f5d287"/></g>
