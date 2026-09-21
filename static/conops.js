@@ -27,11 +27,12 @@ function conopsSpacecraft(m,mini=false){
  // transform: undistorted along the span (a=1,b=0, no lean as the panel
  // extends outward) and mostly upright along their depth (c,d close to 0,1)
  // so each array reads as a standing panel facing the viewer, not a plank
- // lying flat. The local rect is centered on y=0, and f centers the wings on
- // the bus's own visual vertical center — not just the front-face rect
- // (-b*.75 to b*.6), but the full drawn box, whose side/bottom faces extend
- // the silhouette down to b*.6+20 via the same depth vector used elsewhere.
- const bodyCenterY=(-b*.75+b*.6+20)/2;
+ // lying flat. The local rect is centered on y=0, and f is the vertical
+ // center of #conopsBody itself (-b*.75 to b*.6) — the face a viewer reads
+ // as "the bus" — so the strut meets that face at its own visual midline,
+ // not the lower center of mass the depth-extruded side/bottom faces pull
+ // the full silhouette toward.
+ const bodyCenterY=-b*.75+b*1.35/2;
  const wingTransform=`matrix(1 0 .1 .95 0 ${bodyCenterY})`;
  return `<g ${id('conopsSatellite')}>
   <g transform="${wingTransform}" stroke="#6bbed8" stroke-width="1">
