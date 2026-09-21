@@ -23,19 +23,31 @@ function conopsSpacecraft(m,mini=false){
  const id=name=>mini?'':`id="${name}"`;
  let antennas='';
  for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b*.5+(n%6)*b*.2}" cy="${-12+(Math.floor(n/6)+.5)*24/rows}" r="1.6" fill="#f5d287"/>`;
+ // Each wing has its own yoke off #conopsBody's own vertical midline (f),
+ // canted up and outward like a real deployed array instead of lying level:
+ // b tilts the span upward as it extends away from the bus, c,d keep it
+ // mostly upright (a standing panel, not a plank lying flat) along its
+ // depth. The left wing's transform mirrors the right's (b,c negated) so
+ // both cant upward symmetrically instead of one rising and one dipping.
+ const bodyCenterY=-b*.75+b*1.35/2;
+ const wingR=`matrix(1 -.4 .1 .95 0 ${bodyCenterY})`,wingL=`matrix(1 .4 -.1 .95 0 ${bodyCenterY})`;
  return `<g ${id('conopsSatellite')}>
-  <g transform="matrix(1 .18 -.55 .72 0 -8)" stroke="#6bbed8" stroke-width="1">
-   <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
-   <rect ${id('conopsSolar')} x="${-b-w-16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
-   <rect x="${b+16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
-   <path d="M${-b-16} 0 H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
+  <g transform="${wingL}" stroke="#3c5568" stroke-width="1">
+   <path d="M${-b-w-16} -24 h${w} v48 h${-w}Z" fill="#050b12" transform="translate(0 5)"/>
+   <rect ${id('conopsSolar')} x="${-b-w-16}" y="-24" width="${w}" height="48" fill="url(#conopsCells)"/>
+   <path d="M${-b-16} 0 H${-b}" stroke="#43607a" stroke-width="5"/>
+  </g>
+  <g transform="${wingR}" stroke="#3c5568" stroke-width="1">
+   <path d="M${b+16} -24 h${w} v48 h${-w}Z" fill="#050b12" transform="translate(0 5)"/>
+   <rect x="${b+16}" y="-24" width="${w}" height="48" fill="url(#conopsCells)"/>
+   <path d="M${b} 0 H${b+16}" stroke="#43607a" stroke-width="5"/>
   </g>
   <rect ${id('conopsBody')} x="${-b}" y="${-b*.75}" width="${b*2}" height="${b*1.35}" rx="2" fill="url(#conopsGold)" stroke="#d3b976"/>
   <path d="M${b} ${-b*.75} L${b+24} ${-b*.75+20} V${b*.6+20} L${b} ${b*.6}Z" fill="#775b33" stroke="#d3b976"/>
   <path d="M${-b} ${b*.6} H${b} L${b+24} ${b*.6+20} H${-b+24}Z" fill="#52616a" stroke="#b7cbd1"/>
   <path d="M${-b+4} ${-b*.75+4} L${b-4} ${b*.6-4} M${b-4} ${-b*.75+4} L${-b+4} ${b*.6-4}" stroke="#fff0bf" stroke-opacity=".24"/>
   <g transform="translate(${b+18} ${b*.6-10}) skewY(-34)"><rect ${id('conopsRadiator')} width="${r}" height="26" fill="#c8dce5" stroke="#fff"/>${Array.from({length:5},(_,i)=>`<path d="M2 ${4+i*4} H${r-2}" stroke="#799fb5"/>`).join('')}</g>
-  <path d="M-8 ${-b*.75+3} V${-b*.75-22} M-16 ${-b*.75-18} H0" stroke="#d7e9f1" stroke-width="2"/>
+  <path d="M-8 ${-b*.75+3} V${-b*.75-24}" stroke="#d7e9f1" stroke-width="2"/><circle cx="-8" cy="${-b*.75-24}" r="3" fill="#d7e9f1"/>
   <circle cx="${b*.4}" cy="${-b*.75+10}" r="5" fill="#0c2845" stroke="#acccdb"/>
   <path d="M${-b*.6} ${b*.5} L${reflector.x} ${reflector.y-10}" stroke="#b5cbd4" stroke-width="4"/>
   <g ${id('conopsReflector')} transform="translate(${reflector.x} ${reflector.y}) rotate(32)"><path d="M${-dish} 0 Q0 ${-dish*1.45} ${dish} 0" fill="url(#conopsMetal)" stroke="#b5d9e6"/><ellipse rx="${dish}" ry="${dish*.34}" fill="#274d62" stroke="#cae6f0"/><path d="M${-dish} 0 L0 ${dish*.8} L${dish} 0 M0 0 V${dish*.8}" stroke="#e7d3a0" fill="none"/><circle cy="${dish*.8}" r="2.5" fill="#f5d287"/></g>
@@ -82,19 +94,19 @@ function conopsScene(m){
   <linearGradient id="conopsGold"><stop stop-color="#856339"/><stop offset=".35" stop-color="#ddc18b"/><stop offset=".65" stop-color="#ab8549"/><stop offset="1" stop-color="#e0ca98"/></linearGradient>
   <linearGradient id="conopsMetal" x2=".7" y2="1"><stop stop-color="#f4fafc"/><stop offset=".4" stop-color="#96b6c9"/><stop offset="1" stop-color="#375c76"/></linearGradient>
   <linearGradient id="conopsBeam" x2="0" y2="1"><stop stop-color="#ffb291" stop-opacity=".025"/><stop offset="1" stop-color="#f97859" stop-opacity=".14"/></linearGradient>
-  <pattern id="conopsCells" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#153d72"/><rect x="1" y="1" width="10" height="10" fill="#22588c" stroke="#5b9ec3" stroke-width=".45"/><path d="M2 4 H10 M2 8 H10" stroke="#98c4dc" stroke-opacity=".3" stroke-width=".5"/></pattern>
+  <pattern id="conopsCells" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#0a1119"/><rect x="1" y="1" width="10" height="10" fill="#141f2b" stroke="#3c5568" stroke-width=".45"/><path d="M2 4 H10 M2 8 H10" stroke="#5a7690" stroke-opacity=".3" stroke-width=".5"/></pattern>
   <filter id="conopsGlow" x="-50%" y="-300%" width="200%" height="700%"><feGaussianBlur stdDeviation="4"/></filter>
   <clipPath id="conopsTerrainClip"><path d="M-60 497 Q600 286 1260 497 V670 H-60Z"/></clipPath>
  </defs>`;
  const groundScene=`<g clip-path="url(#conopsTerrainClip)"><path d="M-60 497 Q600 286 1260 497 V670 H-60Z" fill="url(#conopsEarth)"/><path d="M80 459 L210 421 298 427 356 407 457 443 509 429 561 451 542 477 589 498 548 531 456 514 375 554 287 540 260 510 156 518Z M820 421 L899 448 990 442 1081 491 1049 539 975 525 952 567 871 581 789 545 745 494 784 475Z" fill="#4b716c" opacity=".32"/><g fill="none" stroke="#72b4c4" stroke-opacity=".13">${grid}</g><path d="M60 560 Q260 481 386 555 T900 587 L1120 537" fill="none" stroke="#a7c7cc" stroke-opacity=".14" stroke-width="5"/></g><path d="M-60 497 Q600 286 1260 497" fill="none" stroke="#79d6ed" stroke-width="9" opacity=".28" filter="url(#conopsGlow)"/><path d="M-60 497 Q600 286 1260 497" fill="none" stroke="#8ed7e8" stroke-width="1.4" opacity=".55"/>`;
  const label=(...a)=>conopsTag(...a);
  const overview=`<g opacity="${coverage?.35:1}">${fleet}</g>${groundScene}
-  ${coverage?`<g id="conopsEnvelope"><ellipse cx="640" cy="${ground}" rx="${spread+20}" ry="87" fill="#80d9df" fill-opacity=".04" stroke="#8adce4" stroke-width="1.5" stroke-dasharray="6 5"/><path d="M640 ${ground+91} h${spread+20} m0 -5 v10 M640 ${ground+86} v10" fill="none" stroke="#8adce4"/><text class="conops-label" x="${640+(spread+20)/2}" y="${ground+80}" text-anchor="middle" fill="#a8e4ec" font-size="12">가시 반경 약 ${Math.round(m.footprint).toLocaleString()} km</text></g>`:''}
+  ${coverage?`<g id="conopsEnvelope"><ellipse cx="640" cy="${ground}" rx="${spread+20}" ry="87" fill="#80d9df" fill-opacity=".04" stroke="#8adce4" stroke-width="1.5" stroke-dasharray="6 5"/><path d="M640 ${ground+91} h${spread+20} m0 -5 v10 M640 ${ground+86} v10" fill="none" stroke="#8adce4"/><text class="conops-label" x="${640+(spread+20)/2}" y="${ground+80}" text-anchor="middle" fill="#a8e4ec" font-size="12" paint-order="stroke" stroke="#050f18" stroke-width="4" stroke-linejoin="round">가시 반경 약 ${Math.round(m.footprint).toLocaleString()} km</text></g>`:''}
   <g class="conops-links">${beams}
-   <path class="conops-flow" d="M210 469 Q346 284 ${fx} ${fy}" fill="none" stroke="#edcc85" stroke-width="2.5" stroke-dasharray="9 8"/>
-   <path class="conops-flow conops-return" d="M${fx} ${fy} Q330 319 225 480" fill="none" stroke="#edcc85" stroke-opacity=".4" stroke-dasharray="4 9"/>
+   <path class="conops-flow" d="M210 469 L${fx} ${fy}" fill="none" stroke="#edcc85" stroke-width="2.5" stroke-dasharray="9 8"/>
+   <path class="conops-flow conops-return" d="M${fx} ${fy} L225 480" fill="none" stroke="#edcc85" stroke-opacity=".4" stroke-dasharray="4 9"/>
    <path class="conops-flow" d="M198 497 L125 556 H315 L351 537" fill="none" stroke="#78d4d7" stroke-width="2" stroke-dasharray="5 7"/>
-   <path class="conops-flow" d="M350 504 Q358 355 ${ax} ${ay}" fill="none" stroke="#79d4d7" stroke-dasharray="3 9"/>
+   <path class="conops-flow" d="M350 504 L${ax} ${ay}" fill="none" stroke="#79d4d7" stroke-dasharray="3 9"/>
   </g>
   ${m.isl>0?`<g id="conopsISL" class="conops-links"><path class="conops-flow" d="M${sx+95} ${sy-9} L965 183" stroke="#bda5ff" stroke-width="2" stroke-dasharray="7 7"/><g transform="translate(985 180) scale(.36)">${conopsSpacecraft(m,true)}</g>${label(940,250,'INTER-SATELLITE LINK',`Offload ${Math.round(m.isl*100)}%`,'#c7b8f8')}</g>`:''}
   <g opacity="${coverage?.32:1}">${conopsBuilding(151,500,65,24)}${conopsDish(201,479,.9)}${conopsDish(140,502,.48)}${conopsBuilding(295,553,85,40)}${conopsBuilding(351,531,34,24)}${conopsBuilding(970,553,28,60)}${conopsBuilding(1009,564,37,91)}${conopsBuilding(1060,564,26,43)}${conopsBuilding(1094,552,19,29)}
