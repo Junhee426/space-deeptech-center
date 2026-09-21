@@ -27,13 +27,16 @@ function conopsSpacecraft(m,mini=false){
  // transform: undistorted along the span (a=1,b=0, no lean as the panel
  // extends outward) and mostly upright along their depth (c,d close to 0,1)
  // so each array reads as a standing panel facing the viewer, not a plank
- // lying flat.
- const wingTransform='matrix(1 0 .1 .95 0 -8)';
+ // lying flat. The local rect is centered on y=0, and f is the bus body
+ // rect's own vertical center, so the wings sit level with the satellite's
+ // centerline instead of the bus's top edge.
+ const bodyCenterY=-b*.75+b*1.35/2;
+ const wingTransform=`matrix(1 0 .1 .95 0 ${bodyCenterY})`;
  return `<g ${id('conopsSatellite')}>
   <g transform="${wingTransform}" stroke="#6bbed8" stroke-width="1">
-   <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
-   <rect ${id('conopsSolar')} x="${-b-w-16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
-   <rect x="${b+16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
+   <path d="M${-b-w-16} -24 h${w} v48 h${-w}Z M${b+16} -24 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
+   <rect ${id('conopsSolar')} x="${-b-w-16}" y="-24" width="${w}" height="48" fill="url(#conopsCells)"/>
+   <rect x="${b+16}" y="-24" width="${w}" height="48" fill="url(#conopsCells)"/>
    <path d="M${-b-16} 0 H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
   </g>
   <rect ${id('conopsBody')} x="${-b}" y="${-b*.75}" width="${b*2}" height="${b*1.35}" rx="2" fill="url(#conopsGold)" stroke="#d3b976"/>
