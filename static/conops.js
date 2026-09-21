@@ -23,12 +23,12 @@ function conopsSpacecraft(m,mini=false){
  const id=name=>mini?'':`id="${name}"`;
  let antennas='';
  for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b*.5+(n%6)*b*.2}" cy="${-12+(Math.floor(n/6)+.5)*24/rows}" r="1.6" fill="#f5d287"/>`;
- // Both wings ride the same flat yoke straight out from the bus, so they use
- // one shared transform: undistorted along the span (a=1,b=0, no lean as the
- // panel extends outward) and foreshortened along their depth by the same
- // (24,20) vector the bus body itself uses, so the arrays read as coplanar
- // with the bus instead of fanned open at their own angle.
- const wingTransform='matrix(1 0 .5 .41667 0 -8)';
+ // Both wings ride the same flat yoke straight out from the bus and share one
+ // transform: undistorted along the span (a=1,b=0, no lean as the panel
+ // extends outward) and mostly upright along their depth (c,d close to 0,1)
+ // so each array reads as a standing panel facing the viewer, not a plank
+ // lying flat.
+ const wingTransform='matrix(1 0 .1 .95 0 -8)';
  return `<g ${id('conopsSatellite')}>
   <g transform="${wingTransform}" stroke="#6bbed8" stroke-width="1">
    <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
