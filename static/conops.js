@@ -103,10 +103,10 @@ function conopsScene(m){
  const overview=`<g opacity="${coverage?.35:1}">${fleet}</g>${groundScene}
   ${coverage?`<g id="conopsEnvelope"><ellipse cx="640" cy="${ground}" rx="${spread+20}" ry="87" fill="#80d9df" fill-opacity=".04" stroke="#8adce4" stroke-width="1.5" stroke-dasharray="6 5"/><path d="M640 ${ground+91} h${spread+20} m0 -5 v10 M640 ${ground+86} v10" fill="none" stroke="#8adce4"/><text class="conops-label" x="${640+(spread+20)/2}" y="${ground+80}" text-anchor="middle" fill="#a8e4ec" font-size="12" paint-order="stroke" stroke="#050f18" stroke-width="4" stroke-linejoin="round">가시 반경 약 ${Math.round(m.footprint).toLocaleString()} km</text></g>`:''}
   <g class="conops-links">${beams}
-   <path class="conops-flow" d="M210 469 Q346 284 ${fx} ${fy}" fill="none" stroke="#edcc85" stroke-width="2.5" stroke-dasharray="9 8"/>
-   <path class="conops-flow conops-return" d="M${fx} ${fy} Q330 319 225 480" fill="none" stroke="#edcc85" stroke-opacity=".4" stroke-dasharray="4 9"/>
+   <path class="conops-flow" d="M210 469 L${fx} ${fy}" fill="none" stroke="#edcc85" stroke-width="2.5" stroke-dasharray="9 8"/>
+   <path class="conops-flow conops-return" d="M${fx} ${fy} L225 480" fill="none" stroke="#edcc85" stroke-opacity=".4" stroke-dasharray="4 9"/>
    <path class="conops-flow" d="M198 497 L125 556 H315 L351 537" fill="none" stroke="#78d4d7" stroke-width="2" stroke-dasharray="5 7"/>
-   <path class="conops-flow" d="M350 504 Q358 355 ${ax} ${ay}" fill="none" stroke="#79d4d7" stroke-dasharray="3 9"/>
+   <path class="conops-flow" d="M350 504 L${ax} ${ay}" fill="none" stroke="#79d4d7" stroke-dasharray="3 9"/>
   </g>
   ${m.isl>0?`<g id="conopsISL" class="conops-links"><path class="conops-flow" d="M${sx+95} ${sy-9} L965 183" stroke="#bda5ff" stroke-width="2" stroke-dasharray="7 7"/><g transform="translate(985 180) scale(.36)">${conopsSpacecraft(m,true)}</g>${label(940,250,'INTER-SATELLITE LINK',`Offload ${Math.round(m.isl*100)}%`,'#c7b8f8')}</g>`:''}
   <g opacity="${coverage?.32:1}">${conopsBuilding(151,500,65,24)}${conopsDish(201,479,.9)}${conopsDish(140,502,.48)}${conopsBuilding(295,553,85,40)}${conopsBuilding(351,531,34,24)}${conopsBuilding(970,553,28,60)}${conopsBuilding(1009,564,37,91)}${conopsBuilding(1060,564,26,43)}${conopsBuilding(1094,552,19,29)}
