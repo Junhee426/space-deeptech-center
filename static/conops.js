@@ -11,12 +11,18 @@ function conopsBuilding(x,y,w,h,color='#47738d'){
 function conopsDish(x,y,scale=1){
  return `<g transform="translate(${x} ${y}) scale(${scale})"><ellipse cy="6" rx="31" ry="9" fill="#000b15" opacity=".6"/><path d="M-12 0 L0 -39 L12 0Z" fill="#8bafbf" stroke="#d3e4ec"/><path d="M-5 -30 L16 -52" stroke="#bacfd9" stroke-width="6"/><g transform="translate(7 -48) rotate(-32)"><path d="M-29 0 Q0 45 29 0" fill="url(#conopsMetal)" stroke="#c5e5ef"/><ellipse rx="29" ry="10" fill="#254d67" stroke="#d6edf4" stroke-width="2"/><path d="M-26 0 L0 -25 L25 0 M0 -25 V7" fill="none" stroke="#a9cbd9" stroke-width="2"/><circle cy="-25" r="4" fill="#edc575"/></g></g>`;
 }
+// Local +Y is nadir: apertures and feeds face the ground below the bus.
+function conopsAntennaGeometry(m){
+ const b=m.bodySize*2.1,dish=conopsClamp(m.dish*24,10,30);
+ return {b,dish,array:{x:b*.35,y:b*.6+12},reflector:{x:-b-8,y:b*.6+14}};
+}
 function conopsSpacecraft(m,mini=false){
  const b=m.bodySize*2.1,w=m.wing*1.55,r=m.radiatorSize*1.4;
- const cells=conopsClamp(Math.ceil(Math.sqrt(m.elements)),4,24),dish=conopsClamp(m.dish*24,10,30);
+ const cells=conopsClamp(Math.ceil(Math.sqrt(m.elements)),4,24);
+ const {dish,array,reflector}=conopsAntennaGeometry(m),rows=Math.ceil(cells/6);
  const id=name=>mini?'':`id="${name}"`;
  let antennas='';
- for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b+6+(n%6)*b*.27}" cy="${5+Math.floor(n/6)*5}" r="1.6" fill="#f5d287"/>`;
+ for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b*.5+(n%6)*b*.2}" cy="${-7+(Math.floor(n/6)+.5)*14/rows}" r="1.6" fill="#f5d287"/>`;
  return `<g ${id('conopsSatellite')}>
   <g transform="matrix(1 .18 -.55 .72 0 -8)" stroke="#6bbed8" stroke-width="1">
    <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
@@ -31,14 +37,19 @@ function conopsSpacecraft(m,mini=false){
   <g transform="translate(${b+18} ${b*.6-10}) skewY(-34)"><rect ${id('conopsRadiator')} width="${r}" height="26" fill="#c8dce5" stroke="#fff"/>${Array.from({length:5},(_,i)=>`<path d="M2 ${4+i*4} H${r-2}" stroke="#799fb5"/>`).join('')}</g>
   <path d="M-8 ${-b*.75-9} V${-b*.75-30} M-16 ${-b*.75-26} H0" stroke="#d7e9f1" stroke-width="2"/>
   <circle cx="${b*.4}" cy="${-b*.75-14}" r="5" fill="#0c2845" stroke="#acccdb"/>
-  <g transform="translate(${-b*.2} ${b*.65+9}) rotate(18)"><path d="M${-dish} 0 Q0 ${dish*1.45} ${dish} 0" fill="url(#conopsMetal)" stroke="#b5d9e6"/><ellipse rx="${dish}" ry="${dish*.34}" fill="#274d62" stroke="#cae6f0"/><path d="M${-dish} 0 L0 ${-dish*.8} L${dish} 0" stroke="#e7d3a0" fill="none"/></g>
-  <g transform="translate(0 ${-b*.42})"><rect x="${-b+3}" y="0" width="${b*1.75}" height="${Math.ceil(cells/6)*5+8}" rx="2" fill="#0a2941" stroke="#e2ca86"/>${antennas}</g>
+  <path d="M${-b*.6} ${b*.5} L${reflector.x} ${reflector.y-10}" stroke="#b5cbd4" stroke-width="4"/>
+  <g ${id('conopsReflector')} transform="translate(${reflector.x} ${reflector.y}) rotate(32)"><path d="M${-dish} 0 Q0 ${-dish*1.45} ${dish} 0" fill="url(#conopsMetal)" stroke="#b5d9e6"/><ellipse rx="${dish}" ry="${dish*.34}" fill="#274d62" stroke="#cae6f0"/><path d="M${-dish} 0 L0 ${dish*.8} L${dish} 0 M0 0 V${dish*.8}" stroke="#e7d3a0" fill="none"/><circle cy="${dish*.8}" r="2.5" fill="#f5d287"/></g>
+  <path d="M${array.x} ${b*.6} V${array.y}" stroke="#b5cbd4" stroke-width="5"/>
+  <g ${id('conopsAntennaArray')} transform="translate(${array.x} ${array.y})"><path d="M${-b*.65} -9 V-14 H${b*.65} V-9" fill="#526d7d" stroke="#abc6d3"/><rect x="${-b*.65}" y="-9" width="${b*1.3}" height="18" rx="2" fill="#0a2941" stroke="#e2ca86"/>${antennas}</g>
   <path d="M${b-8} ${b*.6+1} v8 l-6 4 h14 l-5 -4 v-8" fill="#9caeb9"/>
  </g>`;
 }
 function conopsScene(m){
  const payload=conopsView.mode==='payload',coverage=conopsView.mode==='coverage';
  const sx=600,sy=235-conopsClamp((m.alt-300)/1700,0,1)*65;
+ const scale=coverage?.7:1,{array,reflector}=conopsAntennaGeometry(m);
+ const ax=sx+array.x*scale,ay=sy+array.y*scale;
+ const fx=sx+reflector.x*scale,fy=sy+reflector.y*scale;
  const spread=100+conopsClamp(m.footprint/2300,0,1)*215;
  const ground=492,shown=Math.min(m.beams,12),planes=Math.min(m.orbit.planes,5);
  let stars='',grid='',fleet='',beams='',terminals='';
@@ -51,7 +62,7 @@ function conopsScene(m){
   for(let n=0;m.total>1&&n<Math.min(m.orbit.sats_per_plane,4);n++){
    const a=(n/Math.min(m.orbit.sats_per_plane,4)*Math.PI*2)+p*.55+m.orbit.walker_f*.18;
    const x=600+Math.cos(a)*(385+p*28),y=235+Math.sin(a)*(60+slope*95);
-   fleet+=`<g class="conops-fleet-sat" transform="translate(${x} ${y}) scale(.17)">${conopsSpacecraft(m,true)}</g>`;
+   fleet+=`<g class="conops-fleet-sat" transform="translate(${x} ${y}) rotate(${12-p*8}) scale(.17)">${conopsSpacecraft(m,true)}</g>`;
   }
   fleet+='</g>';
  }
@@ -59,7 +70,7 @@ function conopsScene(m){
   const a=n*2.39996,rad=shown===1?0:Math.sqrt((n+.5)/shown);
   const x=640+Math.cos(a)*spread*.78*rad,y=ground+Math.sin(a)*52*rad;
   const rx=conopsClamp(spread/Math.sqrt(shown)*.7,24,85),ry=rx*.34;
-  beams+=`<g class="conops-beam" data-beam="${n+1}"><path class="conops-cone" d="M${sx} ${sy+32} L${x-rx} ${y} Q${x} ${y+ry*2} ${x+rx} ${y}Z" fill="url(#conopsBeam)"/><ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="#fb6757" fill-opacity=".10" stroke="#ef8c77" stroke-opacity=".55"/><path class="conops-flow" d="M${sx} ${sy+32} L${x} ${y}" stroke="#f8a591" stroke-opacity=".48" stroke-dasharray="3 14" fill="none"/></g>`;
+  beams+=`<g class="conops-beam" data-beam="${n+1}"><path class="conops-cone" d="M${ax} ${ay} L${x-rx} ${y} Q${x} ${y+ry*2} ${x+rx} ${y}Z" fill="url(#conopsBeam)"/><ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" fill="#fb6757" fill-opacity=".10" stroke="#ef8c77" stroke-opacity=".55"/><path class="conops-flow" d="M${ax} ${ay} L${x} ${y}" stroke="#f8a591" stroke-opacity=".48" stroke-dasharray="3 14" fill="none"/></g>`;
   terminals+=`<g transform="translate(${x} ${y})"><path d="M-4 0 H4 V-9 H-4Z M0 -9 V-17 M-6 -17 Q0 -22 6 -17" fill="#2d6478" stroke="#bde5ea" stroke-width="1.3"/></g>`;
  }
  const defs=`<defs>
@@ -77,16 +88,16 @@ function conopsScene(m){
  const overview=`<g opacity="${coverage?.35:1}">${fleet}</g>${groundScene}
   ${coverage?`<g id="conopsEnvelope"><ellipse cx="640" cy="${ground}" rx="${spread+20}" ry="87" fill="#80d9df" fill-opacity=".04" stroke="#8adce4" stroke-width="1.5" stroke-dasharray="6 5"/><path d="M640 ${ground+91} h${spread+20} m0 -5 v10 M640 ${ground+86} v10" fill="none" stroke="#8adce4"/><text class="conops-label" x="${640+(spread+20)/2}" y="${ground+80}" text-anchor="middle" fill="#a8e4ec" font-size="12">가시 반경 약 ${Math.round(m.footprint).toLocaleString()} km</text></g>`:''}
   <g class="conops-links">${beams}
-   <path class="conops-flow" d="M210 469 Q346 284 ${sx-35} ${sy+12}" fill="none" stroke="#edcc85" stroke-width="2.5" stroke-dasharray="9 8"/>
-   <path class="conops-flow conops-return" d="M${sx-45} ${sy+23} Q330 319 225 480" fill="none" stroke="#edcc85" stroke-opacity=".4" stroke-dasharray="4 9"/>
+   <path class="conops-flow" d="M210 469 Q346 284 ${fx} ${fy}" fill="none" stroke="#edcc85" stroke-width="2.5" stroke-dasharray="9 8"/>
+   <path class="conops-flow conops-return" d="M${fx} ${fy} Q330 319 225 480" fill="none" stroke="#edcc85" stroke-opacity=".4" stroke-dasharray="4 9"/>
    <path class="conops-flow" d="M198 497 L125 556 H315 L351 537" fill="none" stroke="#78d4d7" stroke-width="2" stroke-dasharray="5 7"/>
-   <path class="conops-flow" d="M350 504 Q358 355 ${sx-22} ${sy+15}" fill="none" stroke="#79d4d7" stroke-dasharray="3 9"/>
+   <path class="conops-flow" d="M350 504 Q358 355 ${ax} ${ay}" fill="none" stroke="#79d4d7" stroke-dasharray="3 9"/>
   </g>
   ${m.isl>0?`<g id="conopsISL" class="conops-links"><path class="conops-flow" d="M${sx+95} ${sy-9} L965 183" stroke="#bda5ff" stroke-width="2" stroke-dasharray="7 7"/><g transform="translate(985 180) scale(.36)">${conopsSpacecraft(m,true)}</g>${label(940,250,'INTER-SATELLITE LINK',`Offload ${Math.round(m.isl*100)}%`,'#c7b8f8')}</g>`:''}
   <g opacity="${coverage?.32:1}">${conopsBuilding(151,500,65,24)}${conopsDish(201,479,.9)}${conopsDish(140,502,.48)}${conopsBuilding(295,553,85,40)}${conopsBuilding(351,531,34,24)}${conopsBuilding(970,553,28,60)}${conopsBuilding(1009,564,37,91)}${conopsBuilding(1060,564,26,43)}${conopsBuilding(1094,552,19,29)}
    <path d="M813 575 l57 0 -12 14 h-36Z" fill="#7ea6b7"/><path d="M837 575 v-24 l18 24Z" fill="#d4e6eb"/><path d="M838 551 v-7" stroke="#aacee0"/>
   </g>${terminals}
-  <g transform="translate(${sx} ${sy}) scale(${coverage?.7:1})">${conopsSpacecraft(m)}</g>
+  <g transform="translate(${sx} ${sy}) scale(${scale})">${conopsSpacecraft(m)}</g>
   <g class="conops-label" fill="#091726" opacity=".9"><rect x="18" y="15" width="350" height="110" rx="8"/><rect x="842" y="15" width="340" height="110" rx="8"/></g>
   ${label(32,37,'MISSION / SPACE SEGMENT',`${m.alt.toLocaleString()} km · ${m.orbit.inclination_deg}° inclination`)}
   ${label(32,91,'WALKER CONSTELLATION',`${m.orbit.planes} × ${m.orbit.sats_per_plane} / ${m.total} satellites · F ${m.orbit.walker_f}`,'#92aabf')}
@@ -105,11 +116,12 @@ function conopsScene(m){
   <g transform="translate(590 307) scale(1.75)">${conopsSpacecraft(m)}</g>
   ${label(32,38,'SPACECRAFT / PAYLOAD DETAIL',m.archLabel)}
   ${label(1168,38,'PARAMETRIC ASSEMBLY',m.current?'현재 계산 결과의 상대 크기':'입력 미리보기 · RUN / SYNC 후 크기 갱신','#edc980','end')}
-  <g class="conops-label" fill="none" stroke="#718fa4"><path d="M310 143 H386 L420 264"/><path d="M857 146 H774 L642 271"/><path d="M301 418 H423 L552 344"/><path d="M862 407 H803 L688 326"/></g>
+  <g class="conops-label" fill="none" stroke="#718fa4"><path d="M310 143 H386 L420 264"/><path d="M857 146 H774 L${590+array.x*1.75} ${307+array.y*1.75}"/><path d="M301 418 H423 L${590+reflector.x*1.75} ${307+reflector.y*1.75}"/><path d="M862 407 H803 L688 326"/></g>
   ${label(45,132,'01 / SOLAR ARRAY',m.current?`탑재체 전력 ${m.power} W 기반 상대 면적`:'탑재체 전력 계산 대기','#89d9ef')}
-  ${label(863,132,'02 / ANTENNA ARRAY',`${m.beamArch} · ${m.elements} elements`,'#edc980')}
-  ${label(45,410,'03 / REFLECTOR',`안테나 직경 ${m.dish} m · ${m.freq} GHz`,'#edc980')}
+  ${label(863,132,'02 / NADIR ANTENNA ARRAY',`${m.beamArch} · ${m.elements} elements`,'#edc980')}
+  ${label(45,410,'03 / EARTH-FACING REFLECTOR',`안테나 직경 ${m.dish} m · ${m.freq} GHz`,'#edc980')}
   ${label(863,400,'04 / THERMAL RADIATOR',m.current?`${m.radiator} m² · 열 부하 ${m.heat} W`:'방열 면적 계산 대기','#b9dce9')}
+  <g class="conops-label"><path d="M755 426 v43 m-5 -7 l5 7 5 -7" fill="none" stroke="#89d9ef"/><text x="769" y="453" fill="#89d9ef" font-size="12">NADIR / 지구 방향</text></g>
   <g class="conops-label"><rect x="55" y="509" width="1090" height="101" rx="12" fill="#0a2033" stroke="#36526a"/><text x="78" y="535" fill="#8eb1c9" font-size="11" letter-spacing="2">ON-BOARD SIGNAL PATH</text></g>
   ${conopsSignalPath(m)}
   <text class="conops-label" x="55" y="641" fill="#91a9bb" font-size="12">본체: 질량 · 태양전지판: 탑재체 전력 · 방열판: 방열 면적에 연동 / 제작 치수와 배치가 아닌 상대적 표현</text>`;
