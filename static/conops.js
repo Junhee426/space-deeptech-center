@@ -23,20 +23,19 @@ function conopsSpacecraft(m,mini=false){
  const id=name=>mini?'':`id="${name}"`;
  let antennas='';
  for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b*.5+(n%6)*b*.2}" cy="${-12+(Math.floor(n/6)+.5)*24/rows}" r="1.6" fill="#f5d287"/>`;
- // The two wings share one bus-mounted yoke, so the right wing uses the mirror
- // of the left wing's shear (b,c negated) to stay a true reflection, not a
- // second copy of the same lean.
- const boomY=-.18*(b+16)-8;
+ // Both wings ride the same flat yoke straight out from the bus, so they use
+ // one shared transform: undistorted along the span (a=1,b=0, no lean as the
+ // panel extends outward) and foreshortened along their depth by the same
+ // (24,20) vector the bus body itself uses, so the arrays read as coplanar
+ // with the bus instead of fanned open at their own angle.
+ const wingTransform='matrix(1 0 .5 .41667 0 -8)';
  return `<g ${id('conopsSatellite')}>
-  <g transform="matrix(1 .18 -.55 .72 0 -8)" stroke="#6bbed8" stroke-width="1">
-   <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
+  <g transform="${wingTransform}" stroke="#6bbed8" stroke-width="1">
+   <path d="M${-b-w-16} -25 h${w} v48 h${-w}Z M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
    <rect ${id('conopsSolar')} x="${-b-w-16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
-  </g>
-  <g transform="matrix(1 -.18 .55 .72 0 -8)" stroke="#6bbed8" stroke-width="1">
-   <path d="M${b+16} -25 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
    <rect x="${b+16}" y="-25" width="${w}" height="48" fill="url(#conopsCells)"/>
+   <path d="M${-b-16} 0 H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
   </g>
-  <path d="M${-b-16} ${boomY} H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
   <rect ${id('conopsBody')} x="${-b}" y="${-b*.75}" width="${b*2}" height="${b*1.35}" rx="2" fill="url(#conopsGold)" stroke="#d3b976"/>
   <path d="M${b} ${-b*.75} L${b+24} ${-b*.75+20} V${b*.6+20} L${b} ${b*.6}Z" fill="#775b33" stroke="#d3b976"/>
   <path d="M${-b} ${b*.6} H${b} L${b+24} ${b*.6+20} H${-b+24}Z" fill="#52616a" stroke="#b7cbd1"/>
