@@ -23,23 +23,24 @@ function conopsSpacecraft(m,mini=false){
  const id=name=>mini?'':`id="${name}"`;
  let antennas='';
  for(let n=0;n<cells;n++)antennas+=`<circle cx="${-b*.5+(n%6)*b*.2}" cy="${-12+(Math.floor(n/6)+.5)*24/rows}" r="1.6" fill="#f5d287"/>`;
- // Both wings ride the same flat yoke straight out from the bus and share one
- // transform: undistorted along the span (a=1,b=0, no lean as the panel
- // extends outward) and mostly upright along their depth (c,d close to 0,1)
- // so each array reads as a standing panel facing the viewer, not a plank
- // lying flat. The local rect is centered on y=0, and f is the vertical
- // center of #conopsBody itself (-b*.75 to b*.6) — the face a viewer reads
- // as "the bus" — so the strut meets that face at its own visual midline,
- // not the lower center of mass the depth-extruded side/bottom faces pull
- // the full silhouette toward.
+ // Each wing has its own yoke off #conopsBody's own vertical midline (f),
+ // canted up and outward like a real deployed array instead of lying level:
+ // b tilts the span upward as it extends away from the bus, c,d keep it
+ // mostly upright (a standing panel, not a plank lying flat) along its
+ // depth. The left wing's transform mirrors the right's (b,c negated) so
+ // both cant upward symmetrically instead of one rising and one dipping.
  const bodyCenterY=-b*.75+b*1.35/2;
- const wingTransform=`matrix(1 0 .1 .95 0 ${bodyCenterY})`;
+ const wingR=`matrix(1 -.4 .1 .95 0 ${bodyCenterY})`,wingL=`matrix(1 .4 -.1 .95 0 ${bodyCenterY})`;
  return `<g ${id('conopsSatellite')}>
-  <g transform="${wingTransform}" stroke="#6bbed8" stroke-width="1">
-   <path d="M${-b-w-16} -24 h${w} v48 h${-w}Z M${b+16} -24 h${w} v48 h${-w}Z" fill="#081b36" transform="translate(0 5)"/>
+  <g transform="${wingL}" stroke="#3c5568" stroke-width="1">
+   <path d="M${-b-w-16} -24 h${w} v48 h${-w}Z" fill="#050b12" transform="translate(0 5)"/>
    <rect ${id('conopsSolar')} x="${-b-w-16}" y="-24" width="${w}" height="48" fill="url(#conopsCells)"/>
+   <path d="M${-b-16} 0 H${-b}" stroke="#43607a" stroke-width="5"/>
+  </g>
+  <g transform="${wingR}" stroke="#3c5568" stroke-width="1">
+   <path d="M${b+16} -24 h${w} v48 h${-w}Z" fill="#050b12" transform="translate(0 5)"/>
    <rect x="${b+16}" y="-24" width="${w}" height="48" fill="url(#conopsCells)"/>
-   <path d="M${-b-16} 0 H${b+16}" stroke="#a9cbd9" stroke-width="5"/>
+   <path d="M${b} 0 H${b+16}" stroke="#43607a" stroke-width="5"/>
   </g>
   <rect ${id('conopsBody')} x="${-b}" y="${-b*.75}" width="${b*2}" height="${b*1.35}" rx="2" fill="url(#conopsGold)" stroke="#d3b976"/>
   <path d="M${b} ${-b*.75} L${b+24} ${-b*.75+20} V${b*.6+20} L${b} ${b*.6}Z" fill="#775b33" stroke="#d3b976"/>
@@ -93,7 +94,7 @@ function conopsScene(m){
   <linearGradient id="conopsGold"><stop stop-color="#856339"/><stop offset=".35" stop-color="#ddc18b"/><stop offset=".65" stop-color="#ab8549"/><stop offset="1" stop-color="#e0ca98"/></linearGradient>
   <linearGradient id="conopsMetal" x2=".7" y2="1"><stop stop-color="#f4fafc"/><stop offset=".4" stop-color="#96b6c9"/><stop offset="1" stop-color="#375c76"/></linearGradient>
   <linearGradient id="conopsBeam" x2="0" y2="1"><stop stop-color="#ffb291" stop-opacity=".025"/><stop offset="1" stop-color="#f97859" stop-opacity=".14"/></linearGradient>
-  <pattern id="conopsCells" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#153d72"/><rect x="1" y="1" width="10" height="10" fill="#22588c" stroke="#5b9ec3" stroke-width=".45"/><path d="M2 4 H10 M2 8 H10" stroke="#98c4dc" stroke-opacity=".3" stroke-width=".5"/></pattern>
+  <pattern id="conopsCells" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#0a1119"/><rect x="1" y="1" width="10" height="10" fill="#141f2b" stroke="#3c5568" stroke-width=".45"/><path d="M2 4 H10 M2 8 H10" stroke="#5a7690" stroke-opacity=".3" stroke-width=".5"/></pattern>
   <filter id="conopsGlow" x="-50%" y="-300%" width="200%" height="700%"><feGaussianBlur stdDeviation="4"/></filter>
   <clipPath id="conopsTerrainClip"><path d="M-60 497 Q600 286 1260 497 V670 H-60Z"/></clipPath>
  </defs>`;
