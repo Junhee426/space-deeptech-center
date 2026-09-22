@@ -4,7 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Space Deep Tech Center V{{ version }}</title>
 <link rel="stylesheet" href="/static/style.css">
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="/static/vendor/plotly-2.35.2.min.js"></script>
 </head>
 <body>
 <div class="stars"></div>
@@ -432,7 +432,7 @@
           <div class="cols2">
             <label>Runs<input id="mc_runs" value="500" type="number"></label>
             <label>Seed<input id="mc_seed" value="42" type="number"></label>
-            <label>Min Gbps<input id="mc_cap" value="2" type="number"></label>
+            <label>Min Gbps<input id="mc_cap" value="0.5" type="number" step=".1"></label>
             <label>Max power W<input id="mc_pmax" value="1200" type="number"></label>
             <label>Max mass kg<input id="mc_mmax" value="500" type="number"></label>
           </div>
