@@ -1,13 +1,21 @@
 const $=id=>document.getElementById(id), num=id=>parseFloat($(id).value);
 function debounce(fn,ms=180){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}}
 const KASA={navy:"#012B49",red:"#F94239",silver:"#A7ADB3",gold:"#B39A67"};
+// One shared palette for every chart, cycled per trace by Plotly's colorway,
+// so a single-series bar/line/radar always lands on CHART_COLORS[0] (cyan)
+// instead of Plotly's default rainbow, and multi-trace charts (P10/P50/P90,
+// Availability/Continuity, ...) read as one consistent system.
+const CHART_COLORS=["#7ec8df","#F94239","#edc980","#6ee7b0","#4f9fc7","#c9a6ff"];
+const HEAT_SCALE=[[0,"#081826"],[.5,"#1c5270"],[1,"#7ec8df"]];
 const layout={
  paper_bgcolor:"rgba(0,0,0,0)",
  plot_bgcolor:"rgba(0,0,0,0)",
- font:{color:"#dce8ee",size:10},
+ font:{color:"#dce8ee",size:10,family:"Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif"},
  margin:{l:48,r:24,t:34,b:44},
+ colorway:CHART_COLORS,
  xaxis:{gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"},
- yaxis:{gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"}
+ yaxis:{gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"},
+ hoverlabel:{bgcolor:"#0a2033",bordercolor:"#3a5f78",font:{color:"#eaf3f8"}}
 };
 const cfg={displayModeBar:false,responsive:true};
 let lastIntegrated=null,lastIntegratedInput=null;
@@ -25,11 +33,14 @@ async function drawChart(id){
  state.running=true;state.dirty=false;
  try{
   el.classList.remove('chart-empty');
+  el.removeAttribute('data-error');
   await Plotly.react(el,structuredClone(state.traces),{...structuredClone(state.layout),autosize:true,width:el.clientWidth},state.config);
  }catch(error){
   console.warn('Chart could not be drawn: '+id,error);
-  if(el.closest('.view.active'))el.setAttribute('aria-label','차트를 표시하지 못했습니다. 다시 실행해 주세요.');
-  else state.dirty=true;
+  if(el.closest('.view.active')){
+   el.setAttribute('aria-label','차트를 표시하지 못했습니다. 다시 실행해 주세요.');
+   el.setAttribute('data-error','');
+  }else state.dirty=true;
  }finally{state.running=false;if(state.dirty&&el.closest('.view.active'))requestAnimationFrame(()=>drawChart(id));}
 }
 function refreshVisibleCharts(){
@@ -159,10 +170,10 @@ function renderPayload(d){
  $("p_schedkpi").textContent=d.traffic.scheduler; $("p_preckpi").textContent=d.resource.precoding_enabled?d.resource.precoding_method:"MRT";
  reactChart("p_sinrchart",[{type:"bar",x:d.interference.sinr.map(x=>"U"+x.user),y:d.interference.sinr.map(x=>x.sinr_db)}],{...layout,title:"Per-user SINR [dB]"},cfg);
  reactChart("p_trafficmap",[{type:"bar",x:d.traffic.user_share.map((_,i)=>"U"+(i+1)),y:d.traffic.user_share}],{...layout,title:"User traffic share"},cfg);
- reactChart("p_precoder",[{type:"heatmap",z:d.interference.precoder_power_matrix}],{...layout,title:"|W|² precoder matrix"},cfg);
+ reactChart("p_precoder",[{type:"heatmap",z:d.interference.precoder_power_matrix,colorscale:HEAT_SCALE,colorbar:{outlinewidth:0,tickfont:{color:"#9fb5c4",size:9}}}],{...layout,title:"|W|² precoder matrix"},cfg);
  reactChart("p_schedule",[
- {type:"heatmap",z:d.traffic.schedule,name:"Active beams"},
- {type:"scatter",mode:"lines+markers",x:d.traffic.slot_mean_sinr_db.map((_,i)=>i),y:d.traffic.slot_mean_sinr_db,yaxis:"y2",name:"Slot mean SINR"}
+ {type:"heatmap",z:d.traffic.schedule,name:"Active beams",colorscale:[[0,"#0a1a2b"],[1,"#edc980"]],showscale:false},
+ {type:"scatter",mode:"lines+markers",x:d.traffic.slot_mean_sinr_db.map((_,i)=>i),y:d.traffic.slot_mean_sinr_db,yaxis:"y2",name:"Slot mean SINR",line:{color:"#fff",width:2},marker:{color:"#fff",size:5}}
 ],{...layout,title:`Beam hopping · OFDM PAPR ${d.waveform.actual_papr_db} dB`,xaxis:{title:"Time slot"},yaxis:{title:"Beam activity"},yaxis2:{title:"SINR dB",overlaying:"y",side:"right"}},cfg);
 
  $("p_chsource").textContent=d.geometry.channel_source.includes("Walker")?"Walker":"Synthetic";
@@ -185,7 +196,11 @@ function renderRad(d){
  $("r_mtid").textContent=d.dose.mission_tid_krad+" krad"; $("r_use").textContent=d.dose.tid_usage_pct+" %"; $("r_sday").textContent=d.see.seu_day;
  $("r_msel").textContent=d.see.mission_sel; $("r_av").textContent=d.service.electronics_availability_pct+" %"; $("r_risk").textContent=d.risk.class;
  reactChart("r_dosechart",[{type:"bar",x:["TID use","DD use","Risk"],y:[d.dose.tid_usage_pct,d.dose.dd_usage_pct,d.risk.score_pct]}],{...layout,title:"Radiation Budget [%]"},cfg);
- reactChart("r_service",[{type:"indicator",mode:"gauge+number",value:d.risk.score_pct,title:{text:"System Radiation Risk"},gauge:{axis:{range:[0,100]}}}],{...layout},cfg);
+ reactChart("r_service",[{type:"indicator",mode:"gauge+number",value:d.risk.score_pct,title:{text:"System Radiation Risk"},gauge:{axis:{range:[0,100]},bar:{color:"#eaf3f8"},steps:[
+  {range:[0,40],color:"rgba(110,231,176,.28)"},
+  {range:[40,70],color:"rgba(237,201,128,.28)"},
+  {range:[70,100],color:"rgba(249,66,57,.28)"}
+ ]}}],{...layout},cfg);
  warnings("r_warn",d.warnings);
 }
 
@@ -202,7 +217,11 @@ function renderBeam(d){
  $("b_total").textContent=d.power.total_w+" W"; $("b_pmargin").textContent=d.power.margin_w+" W";
  $("b_effbeams").textContent=d.compute.effective_beams; $("b_grating").textContent=d.quality.grating_lobe_risk;
  reactChart("b_powerchart",[{type:"bar",x:["Converters","Processor","Phase control"],y:[d.power.converter_w,d.power.processor_w,d.power.phase_control_w]}],{...layout,title:"Beamforming Power Breakdown [W]"},cfg);
- reactChart("b_gauge",[{type:"indicator",mode:"gauge+number",value:d.compute.effective_beams,title:{text:"Effective Beams"},gauge:{axis:{range:[0,Math.max(1,parseInt($("g_beams").value))]}}}],{...layout},cfg);
+ reactChart("b_gauge",(()=>{const max=Math.max(1,parseInt($("g_beams").value));return[{type:"indicator",mode:"gauge+number",value:d.compute.effective_beams,title:{text:"Effective Beams"},gauge:{axis:{range:[0,max]},bar:{color:"#eaf3f8"},steps:[
+  {range:[0,max*.33],color:"rgba(249,66,57,.28)"},
+  {range:[max*.33,max*.66],color:"rgba(237,201,128,.28)"},
+  {range:[max*.66,max],color:"rgba(110,231,176,.28)"}
+ ]}}]})(),{...layout},cfg);
  warnings("b_warn",d.warnings);
 }
 
@@ -536,13 +555,18 @@ async function runTimeline(){
  const input=timelineObj();
  const d=await post('/api/pass-timeline',input),r=d.rows;
  if(JSON.stringify(input)!==JSON.stringify(timelineObj()))return;
+ // Three stacked subplots on one shared x-axis instead of one axis-cluttered
+ // overlay: visible-sat count, elevation and Doppler all oscillate fast and
+ // on unrelated units, so sharing one plot area made the lines illegible.
  reactChart("tl_chart",[
-  {type:"scatter",mode:"lines",name:"Visible sats",x:r.map(x=>x.time_min),y:r.map(x=>x.visible_count),line:{shape:"hv"}},
+  {type:"scatter",mode:"lines",name:"Visible sats",x:r.map(x=>x.time_min),y:r.map(x=>x.visible_count),line:{shape:"hv"},yaxis:"y"},
   {type:"scatter",mode:"lines",name:"Max elevation °",x:r.map(x=>x.time_min),y:r.map(x=>x.max_elevation_deg),yaxis:"y2"},
   {type:"scatter",mode:"lines",name:"Doppler kHz",x:r.map(x=>x.time_min),y:r.map(x=>x.best_doppler_khz),yaxis:"y3"}
  ],{...layout,title:`${d.region} pass timeline`,xaxis:{title:"Time [min]"},
- yaxis:{title:"Visible sats"},yaxis2:{title:"Elevation °",overlaying:"y",side:"right"},
- yaxis3:{title:"Doppler kHz",overlaying:"y",side:"right",anchor:"free",position:.92},legend:{orientation:"h"}},cfg);
+ yaxis:{title:"Visible sats",domain:[.72,1]},
+ yaxis2:{title:"Elevation °",domain:[.38,.64]},
+ yaxis3:{title:"Doppler kHz",domain:[0,.26]},
+ showlegend:false},cfg);
 }
 $("tl_run").onclick=withLoading($("tl_run"),runTimeline);
 
