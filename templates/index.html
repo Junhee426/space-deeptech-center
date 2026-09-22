@@ -94,11 +94,11 @@
       <div class="dashboard-grid">
         <div class="panel chart-panel">
           <div class="section-title"><span>SYSTEM BALANCE</span><b>5-axis score</b></div>
-          <div id="centerRadar"></div>
+          <div id="centerRadar" class="chart-target"></div>
         </div>
         <div class="panel chart-panel">
           <div class="section-title"><span>ENERGY FLOW</span><b>Where power goes</b></div>
-          <div id="centerPower"></div>
+          <div id="centerPower" class="chart-target"></div>
         </div>
         <div class="panel chart-panel wide">
           <div class="section-title"><span>DESIGN BOTTLENECKS</span><b>What limits the mission now?</b></div>
@@ -178,7 +178,7 @@
           <div class="panel path-card">
             <div class="mini-flow"><b>Material</b><i>→</i><b>PA/LNA</b><i>→</i><b>Power & Heat</b><i>→</i><b>Payload Mass</b><i>→</i><b>Link</b></div>
           </div>
-          <div class="charts"><div class="panel"><div id="s_powerchart"></div></div><div class="panel"><div id="s_orbit"></div></div></div>
+          <div class="charts"><div class="panel"><div id="s_powerchart" class="chart-target"></div></div><div class="panel"><div id="s_orbit" class="chart-target"></div></div></div>
           
           <div class="panel poisson-panel">
             <div class="section-title"><span>DEVICE ELECTROSTATICS</span><b>1D Poisson finite-difference solver</b></div>
@@ -193,7 +193,7 @@
 <label>Intrinsic cm⁻³<input id="po_ni" value="1e10" type="number"></label>
                 <button id="po_run">SOLVE POISSON</button>
               </div>
-              <div id="po_chart"></div>
+              <div id="po_chart" class="chart-target"></div>
             </div>
             <div class="physics-note" id="po_note"></div>
           </div>
@@ -223,7 +223,7 @@
         <div class="lab-content">
           <div class="metrics six"><div><span>Req TOPS</span><b id="b_req">—</b></div><div><span>Compute Margin</span><b id="b_margin">—</b></div><div><span>Total Power</span><b id="b_total">—</b></div><div><span>Power Margin</span><b id="b_pmargin">—</b></div><div><span>Effective Beams</span><b id="b_effbeams">—</b></div><div><span>Grating Risk</span><b id="b_grating">—</b></div></div>
           <div class="panel path-card"><div class="mini-flow"><b>Elements</b><i>→</i><b>Converters</b><i>→</i><b>TOPS</b><i>→</i><b>Power</b><i>→</i><b>Effective Beams</b></div></div>
-          <div class="charts"><div class="panel"><div id="b_powerchart"></div></div><div class="panel"><div id="b_gauge"></div></div></div>
+          <div class="charts"><div class="panel"><div id="b_powerchart" class="chart-target"></div></div><div class="panel"><div id="b_gauge" class="chart-target"></div></div></div>
           <div class="panel warn" id="b_warn"></div>
         </div>
       </div>
@@ -298,8 +298,8 @@
         <div class="lab-content">
           <div class="metrics six"><div><span>RF Output</span><b id="p_out">—</b></div><div><span>Total Power</span><b id="p_total">—</b></div><div><span>Heat</span><b id="p_heat">—</b></div><div><span>Radiator</span><b id="p_rad">—</b></div><div><span>Mass</span><b id="p_mass">—</b></div><div><span>Service Index</span><b id="p_service">—</b></div></div><div class="metrics six"><div><span>HPA Compression</span><b id="p_comp">—</b></div><div><span>Linearity</span><b id="p_lin">—</b></div><div><span>Avg RF</span><b id="p_avgrf">—</b></div><div><span>Channelizer</span><b id="p_bins">—</b></div><div><span>BH Gain</span><b id="p_bhgain">—</b></div><div><span>Feeder Load</span><b id="p_feeder">—</b></div></div><div class="metrics six"><div><span>Mean SINR</span><b id="p_sinr">—</b></div><div><span>5% SINR</span><b id="p_p5sinr">—</b></div><div><span>EVM</span><b id="p_evm">—</b></div><div><span>ACLR proxy</span><b id="p_aclr">—</b></div><div><span>Scheduler</span><b id="p_schedkpi">—</b></div><div><span>Precoding</span><b id="p_preckpi">—</b></div></div><div class="metrics six"><div><span>Channel Source</span><b id="p_chsource">—</b></div><div><span>Scheduled Capacity</span><b id="p_schedcap">—</b></div><div><span>Serving Sat</span><b id="p_servsat">—</b></div><div><span>User Min Elev</span><b id="p_minelev">—</b></div><div><span>User Max Range</span><b id="p_maxrange">—</b></div><div><span>Compute Mode</span><b>NumPy</b></div></div>
           <div class="panel path-card"><div class="mini-flow"><b>ANT</b><i>→</i><b>LNA</b><i>→</i><b>Mixer</b><i>→</i><b>Channelizer</b><i>→</i><b>PA</b><i>→</i><b>Array</b></div></div>
-          <div class="charts"><div class="panel"><div id="p_chain"></div></div><div class="panel"><div id="p_archchart"></div></div></div><div class="charts"><div class="panel"><div id="p_powerstack"></div></div><div class="panel"><div id="p_flex"></div></div></div><div class="charts"><div class="panel"><div id="p_sinrchart"></div></div><div class="panel"><div id="p_trafficmap"></div></div></div>
-          <div class="charts"><div class="panel"><div id="p_precoder"></div></div><div class="panel"><div id="p_schedule"></div></div></div><div class="charts"><div class="panel"><div id="p_geomap"></div></div><div class="panel"><div id="p_userthroughput"></div></div></div>
+          <div class="charts"><div class="panel"><div id="p_chain" class="chart-target"></div></div><div class="panel"><div id="p_archchart" class="chart-target"></div></div></div><div class="charts"><div class="panel"><div id="p_powerstack" class="chart-target"></div></div><div class="panel"><div id="p_flex" class="chart-target"></div></div></div><div class="charts"><div class="panel"><div id="p_sinrchart" class="chart-target"></div></div><div class="panel"><div id="p_trafficmap" class="chart-target"></div></div></div>
+          <div class="charts"><div class="panel"><div id="p_precoder" class="chart-target"></div></div><div class="panel"><div id="p_schedule" class="chart-target"></div></div></div><div class="charts"><div class="panel"><div id="p_geomap" class="chart-target"></div></div><div class="panel"><div id="p_userthroughput" class="chart-target"></div></div></div>
           <div class="panel warn" id="p_warn"></div>
         </div>
       </div>
@@ -327,7 +327,7 @@
         <div class="lab-content">
           <div class="metrics six"><div><span>Mission TID</span><b id="r_mtid">—</b></div><div><span>TID Use</span><b id="r_use">—</b></div><div><span>SEU/day</span><b id="r_sday">—</b></div><div><span>Mission SEL</span><b id="r_msel">—</b></div><div><span>Availability</span><b id="r_av">—</b></div><div><span>Risk</span><b id="r_risk">—</b></div></div>
           <div class="panel path-card"><div class="mini-flow"><b>Environment</b><i>→</i><b>TID/DD/SEE</b><i>→</i><b>Device</b><i>→</i><b>Subsystem</b><i>→</i><b>Satellite</b><i>→</i><b>Service</b></div></div>
-          <div class="charts"><div class="panel"><div id="r_dosechart"></div></div><div class="panel"><div id="r_service"></div></div></div>
+          <div class="charts"><div class="panel"><div id="r_dosechart" class="chart-target"></div></div><div class="panel"><div id="r_service" class="chart-target"></div></div></div>
           <div class="panel warn" id="r_warn"></div>
         </div>
       </div>
@@ -406,8 +406,8 @@
             <div><span>UAE</span><b id="cv_uae">—</b></div>
             <div><span>SE Asia</span><b id="cv_sea">—</b></div>
           </div>
-          <div class="charts"><div class="panel"><div id="cv_regions"></div></div><div class="panel"><div id="cv_visible"></div></div></div>
-          <div class="panel"><div class="section-title"><span>WALKER OPTIONS</span><b>planes × sats/plane</b></div><div id="cv_sweepchart"></div></div>
+          <div class="charts"><div class="panel"><div id="cv_regions" class="chart-target"></div></div><div class="panel"><div id="cv_visible" class="chart-target"></div></div></div>
+          <div class="panel"><div class="section-title"><span>WALKER OPTIONS</span><b>planes × sats/plane</b></div><div id="cv_sweepchart" class="chart-target"></div></div>
           
           <div class="panel timeline-panel">
             <div class="section-title"><span>TIME DOMAIN</span><b>Visible count / elevation / Doppler</b></div>
@@ -417,7 +417,7 @@
               <label>Step sec<input id="tl_step" value="60" type="number"></label>
               <button id="tl_run">RUN PASS TIMELINE</button>
             </div>
-            <div id="tl_chart"></div>
+            <div id="tl_chart" class="chart-target"></div>
           </div>
 <div class="panel warn" id="cv_note"></div>
         </div>
@@ -459,8 +459,8 @@
             <div><span>Mass P90</span><b id="mc_mp90">—</b></div>
             <div><span>Cost P90</span><b id="mc_costp90">—</b></div>
           </div>
-          <div class="charts"><div class="panel"><div id="mc_hist"></div></div><div class="panel"><div id="mc_band"></div></div></div>
-          <div class="panel"><div class="section-title"><span>ROBUSTNESS</span><b>P10 / P50 / P90</b></div><div id="mc_radar"></div></div>
+          <div class="charts"><div class="panel"><div id="mc_hist" class="chart-target"></div></div><div class="panel"><div id="mc_band" class="chart-target"></div></div></div>
+          <div class="panel"><div class="section-title"><span>ROBUSTNESS</span><b>P10 / P50 / P90</b></div><div id="mc_radar" class="chart-target"></div></div>
           <div class="panel warn" id="mc_note"></div>
         </div>
       </div>
@@ -509,7 +509,7 @@
             <div class="eq-big">γ<sub>R</sub> = k R<sup>α</sup></div>
             <p>특정 감쇠는 ITU-R P.838-3, 총 감쇠는 표시된 rain-layer 기하 경로에 적용합니다.</p>
           </div>
-          <div class="panel"><div id="pr_curve"></div></div>
+          <div class="panel"><div id="pr_curve" class="chart-target"></div></div>
           <div class="panel warn" id="pr_note"></div>
         </div>
       </div>
