@@ -198,7 +198,7 @@ main,.view,.lab-content,.panel,.lab-title>div,.main-header>div{min-width:0}
 .lab-layout{grid-template-columns:290px minmax(0,1fr)}
 .dashboard-grid,.charts,.theory-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .metrics.six{grid-template-columns:repeat(6,minmax(0,1fr))}
-.metrics b,.cockpit-grid b,.flow-stage,.lab-title h2,.lab-title p{overflow-wrap:anywhere}
+.lab-title h2,.lab-title p{overflow-wrap:anywhere}
 .cockpit-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
 .charts .panel>div,.chart-panel>div:last-child{max-width:100%}
 .mini-flow{justify-content:flex-start}
@@ -288,3 +288,13 @@ main,.view,.lab-content,.panel,.lab-title>div,.main-header>div{min-width:0}
 @keyframes conops-flow{to{stroke-dashoffset:-68}}
 @media(prefers-reduced-motion:reduce){.conops-playing .conops-flow{animation:none}}
 @media(max-width:560px){.conops-toolbar{align-items:flex-start}.conops-toolbar button{padding:9px 10px}.conops-reference{font-size:11px}}
+
+/* KPI values wrap only at spaces (never mid-number: "99.9998 / 92 %") and
+   shrink with their tile so the longest number token still fits. */
+.metrics div,.cockpit-grid div,.flow-stage{container-type:inline-size}
+.metrics b,.cockpit-grid b{overflow-wrap:normal;font-size:min(18px,21cqi)}
+.flow-stage .name{overflow-wrap:normal;font-size:min(12px,12cqi)}
+
+/* Hover is a light preview; only the selected lab gets the red accent bar. */
+.nav-item:hover{border-color:rgba(126,200,223,.28);background:rgba(126,200,223,.05)}
+.nav-item.active,.nav-item.active:hover{border-color:rgba(249,66,57,.55);background:linear-gradient(90deg,rgba(249,66,57,.13),rgba(255,255,255,.025));box-shadow:inset 3px 0 0 var(--kasa-red)}
