@@ -131,7 +131,7 @@ function conopsScene(m){
   <g transform="translate(590 307) scale(1.75)">${conopsSpacecraft(m)}</g>
   ${label(32,38,'SPACECRAFT / PAYLOAD DETAIL',m.archLabel)}
   ${label(1168,38,'PARAMETRIC ASSEMBLY',m.current?'현재 계산 결과의 상대 크기':'입력 미리보기 · RUN / SYNC 후 크기 갱신','#edc980','end')}
-  <g class="conops-label" fill="none" stroke="#718fa4"><path d="M310 143 H386 L420 264"/><path d="M857 146 H774 L${590+array.x*1.75} ${307+array.y*1.75}"/><path d="M301 418 H423 L${590+reflector.x*1.75} ${307+reflector.y*1.75}"/><path d="M862 407 H803 L688 326"/></g>
+  <g class="conops-label" fill="none" stroke="#718fa4"><path d="M310 143 H386 L420 264"/><path d="M857 146 V${307+array.y*1.75-15} L${590+array.x*1.75} ${307+array.y*1.75}"/><path d="M301 418 H423 L${590+reflector.x*1.75} ${307+reflector.y*1.75}"/><path d="M862 407 H803 L688 326"/></g>
   ${label(45,132,'01 / SOLAR ARRAY',m.current?`탑재체 전력 ${m.power} W 기반 상대 면적`:'탑재체 전력 계산 대기','#89d9ef')}
   ${label(863,132,'02 / NADIR ANTENNA ARRAY',`${m.beamArch} · ${m.elements} elements`,'#edc980')}
   ${label(45,410,'03 / EARTH-FACING REFLECTOR',`안테나 직경 ${m.dish} m · ${m.freq} GHz`,'#edc980')}
