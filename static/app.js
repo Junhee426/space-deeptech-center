@@ -13,17 +13,33 @@ const layout={
  font:{color:"#dce8ee",size:10,family:"Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif"},
  margin:{l:48,r:24,t:34,b:44},
  colorway:CHART_COLORS,
- xaxis:{gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"},
- yaxis:{gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"},
  hoverlabel:{bgcolor:"#0a2033",bordercolor:"#3a5f78",font:{color:"#eaf3f8"}}
 };
+const AXIS={gridcolor:"rgba(130,170,195,.14)",zerolinecolor:"rgba(255,255,255,.10)"};
+// Charts pass their own xaxis/yaxis/yaxis2… objects, which replace rather than
+// extend the base layout's; merge the theme into every axis so an override like
+// yaxis:{range:[0,100]} doesn't fall back to Plotly's bright default grid.
+function themedLayout(l){
+ const out={...l};
+ for(const key of ['xaxis','yaxis'])out[key]??={};
+ for(const key of Object.keys(out))if(/^[xy]axis\d*$/.test(key))out[key]={...AXIS,...out[key]};
+ return out;
+}
 const cfg={displayModeBar:false,responsive:true};
+// Display precision for KPI tiles; the API returns full-precision floats.
+function fmt(v){
+ const n=Number(v);if(v===null||v===''||!Number.isFinite(n))return String(v);
+ const a=Math.abs(n);if(a!==0&&a<.01)return n.toPrecision(2);
+ return n.toLocaleString('en-US',{maximumFractionDigits:a>=100?1:a>=1?2:3});
+}
+// Floor, not round: 99.99996 % must never display as a perfect 100.0000.
+function fmtAvail(v){const n=Number(v);return Number.isFinite(n)?(Math.floor(n*1e4)/1e4).toFixed(4):String(v);}
 let lastIntegrated=null,lastIntegratedInput=null;
 // Cache hidden charts and draw them only after their tab has a measurable width.
 const chartStates=new Map();
 function reactChart(id,traces,layoutObj,cfgObj){
  const state=chartStates.get(id)||{running:false};
- Object.assign(state,{traces:structuredClone(traces),layout:structuredClone(layoutObj),config:cfgObj,dirty:true});
+ Object.assign(state,{traces:structuredClone(traces),layout:structuredClone(themedLayout(layoutObj)),config:cfgObj,dirty:true});
  chartStates.set(id,state);
  drawChart(id);
 }
@@ -155,21 +171,21 @@ function payloadObj(){
  geometry_total_tx_power_w:num("p_geo_tx"),analysis_mode:"Full"}
 }
 function renderPayload(d){
- $("p_out").textContent=d.rf.output_dbw+" dBW"; $("p_total").textContent=d.power.total_w+" W"; $("p_heat").textContent=d.power.heat_w+" W";
- $("p_rad").textContent=d.power.radiator_m2+" m²"; $("p_mass").textContent=d.system.mass_kg+" kg"; $("p_service").textContent=d.system.service_index;
- $("p_comp").textContent=d.rf.hpa_effective_compression_db+" dB"; $("p_lin").textContent=d.rf.hpa_linearity_score+" /100";
- $("p_avgrf").textContent=d.rf.average_rf_w+" W"; $("p_bins").textContent=d.digital.channelizer_bins_proxy;
- $("p_bhgain").textContent=d.resource.normalized_resource_gain+"×"; $("p_feeder").textContent=(d.resource.feeder_load_fraction*100).toFixed(0)+" %";
- reactChart("p_chain",[{type:"scatter",mode:"lines+markers",x:d.chain.map(x=>x.stage),y:d.chain.map(x=>x.level_dbw)}],{...layout,title:"RF Signal Level [dBW]"},cfg);
- reactChart("p_archchart",[{type:"bar",x:["Flexibility","Complexity"],y:[d.system.flexibility_score,d.system.complexity_score]}],{...layout,title:lastIntegratedInput?.payload.architecture||payloadObj().architecture,yaxis:{range:[0,100]}},cfg);
- reactChart("p_powerstack",[{type:"bar",x:["PA DC","Regen","Converters","Channelizer","Routing"],y:[d.power.pa_dc_w,d.digital.regenerative_power_w,d.digital.converter_power_w,d.digital.channelizer_power_w,d.digital.routing_power_w]}],{...layout,title:"Payload Power Stack [W]"},cfg);
- reactChart("p_flex",[{type:"bar",x:["Resource gain","Interference eff.","Demand match","Coverage duty"],y:[d.resource.normalized_resource_gain,d.resource.interference_efficiency,d.resource.demand_match_gain,d.resource.coverage_duty_pct/100]}],{...layout,title:"Flexible Payload Indicators"},cfg);
+ $("p_out").textContent=fmt(d.rf.output_dbw)+" dBW"; $("p_total").textContent=fmt(d.power.total_w)+" W"; $("p_heat").textContent=fmt(d.power.heat_w)+" W";
+ $("p_rad").textContent=fmt(d.power.radiator_m2)+" m²"; $("p_mass").textContent=fmt(d.system.mass_kg)+" kg"; $("p_service").textContent=fmt(d.system.service_index);
+ $("p_comp").textContent=fmt(d.rf.hpa_effective_compression_db)+" dB"; $("p_lin").textContent=fmt(d.rf.hpa_linearity_score)+" /100";
+ $("p_avgrf").textContent=fmt(d.rf.average_rf_w)+" W"; $("p_bins").textContent=d.digital.channelizer_bins_proxy;
+ $("p_bhgain").textContent=fmt(d.resource.normalized_resource_gain)+"×"; $("p_feeder").textContent=(d.resource.feeder_load_fraction*100).toFixed(0)+" %";
+ reactChart("p_chain",[{type:"scatter",mode:"lines+markers",x:d.chain.map(x=>x.stage),y:d.chain.map(x=>x.level_dbw)}],{...layout,title:"RF Signal Level [dBW]",yaxis:{title:"dBW"}},cfg);
+ reactChart("p_archchart",[{type:"bar",x:["Flexibility","Complexity"],y:[d.system.flexibility_score,d.system.complexity_score]}],{...layout,title:lastIntegratedInput?.payload.architecture||payloadObj().architecture,yaxis:{range:[0,100],title:"Score (0–100)"}},cfg);
+ reactChart("p_powerstack",[{type:"bar",x:["PA DC","Regen","Converters","Channelizer","Routing"],y:[d.power.pa_dc_w,d.digital.regenerative_power_w,d.digital.converter_power_w,d.digital.channelizer_power_w,d.digital.routing_power_w]}],{...layout,title:"Payload Power Stack [W]",yaxis:{title:"W"}},cfg);
+ reactChart("p_flex",[{type:"bar",x:["Resource gain","Interference eff.","Demand match","Coverage duty"],y:[d.resource.normalized_resource_gain,d.resource.interference_efficiency,d.resource.demand_match_gain,d.resource.coverage_duty_pct/100]}],{...layout,title:"Flexible Payload Indicators",yaxis:{title:"Ratio (×)"}},cfg);
 
- $("p_sinr").textContent=d.resource.mean_sinr_db+" dB"; $("p_p5sinr").textContent=d.resource.p5_sinr_db+" dB";
- $("p_evm").textContent=d.waveform.evm_pct+" %"; $("p_aclr").textContent=d.waveform.aclr_proxy_db+" dB";
+ $("p_sinr").textContent=fmt(d.resource.mean_sinr_db)+" dB"; $("p_p5sinr").textContent=fmt(d.resource.p5_sinr_db)+" dB";
+ $("p_evm").textContent=fmt(d.waveform.evm_pct)+" %"; $("p_aclr").textContent=fmt(d.waveform.aclr_proxy_db)+" dB";
  $("p_schedkpi").textContent=d.traffic.scheduler; $("p_preckpi").textContent=d.resource.precoding_enabled?d.resource.precoding_method:"MRT";
- reactChart("p_sinrchart",[{type:"bar",x:d.interference.sinr.map(x=>"U"+x.user),y:d.interference.sinr.map(x=>x.sinr_db)}],{...layout,title:"Per-user SINR [dB]"},cfg);
- reactChart("p_trafficmap",[{type:"bar",x:d.traffic.user_share.map((_,i)=>"U"+(i+1)),y:d.traffic.user_share}],{...layout,title:"User traffic share"},cfg);
+ reactChart("p_sinrchart",[{type:"bar",x:d.interference.sinr.map(x=>"U"+x.user),y:d.interference.sinr.map(x=>x.sinr_db)}],{...layout,title:"Per-user SINR [dB]",yaxis:{title:"dB"}},cfg);
+ reactChart("p_trafficmap",[{type:"bar",x:d.traffic.user_share.map((_,i)=>"U"+(i+1)),y:d.traffic.user_share}],{...layout,title:"User traffic share",yaxis:{title:"Share",tickformat:".0%"}},cfg);
  reactChart("p_precoder",[{type:"heatmap",z:d.interference.precoder_power_matrix,colorscale:HEAT_SCALE,colorbar:{outlinewidth:0,tickfont:{color:"#9fb5c4",size:9}}}],{...layout,title:"|W|² precoder matrix"},cfg);
  reactChart("p_schedule",[
  {type:"heatmap",z:d.traffic.schedule,name:"Active beams",colorscale:[[0,"#0a1a2b"],[1,"#edc980"]],showscale:false},
@@ -177,13 +193,13 @@ function renderPayload(d){
 ],{...layout,title:`Beam hopping · OFDM PAPR ${d.waveform.actual_papr_db} dB`,xaxis:{title:"Time slot"},yaxis:{title:"Beam activity"},yaxis2:{title:"SINR dB",overlaying:"y",side:"right"}},cfg);
 
  $("p_chsource").textContent=d.geometry.channel_source.includes("Walker")?"Walker":"Synthetic";
- $("p_schedcap").textContent=d.traffic.aggregate_scheduled_gbps+" Gbps";
+ $("p_schedcap").textContent=fmt(d.traffic.aggregate_scheduled_gbps)+" Gbps";
  $("p_servsat").textContent=d.geometry.satellite_indices.length?d.geometry.satellite_indices[0]:"—";
  const validElev=d.geometry.user_elevation_deg.filter(v=>v>-89);
  $("p_minelev").textContent=validElev.length?Math.min(...validElev).toFixed(1)+"°":"—";
  const validRange=d.geometry.user_range_km.filter(v=>v!==null);
  $("p_maxrange").textContent=validRange.length?Math.max(...validRange).toFixed(0)+" km":"—";
- reactChart("p_userthroughput",[{type:"bar",x:d.traffic.user_throughput_mbps.map((_,i)=>"U"+(i+1)),y:d.traffic.user_throughput_mbps}],{...layout,title:"Scheduled User Throughput [Mbps]"},cfg);
+ reactChart("p_userthroughput",[{type:"bar",x:d.traffic.user_throughput_mbps.map((_,i)=>"U"+(i+1)),y:d.traffic.user_throughput_mbps}],{...layout,title:"Scheduled User Throughput [Mbps]",yaxis:{title:"Mbps"}},cfg);
  const ux=d.geometry.users.map(x=>x.lon), uy=d.geometry.users.map(x=>x.lat);
  const bx=d.geometry.beam_centers.map(x=>x.lon), by=d.geometry.beam_centers.map(x=>x.lat);
  reactChart("p_geomap",[
@@ -193,9 +209,9 @@ function renderPayload(d){
  warnings("p_warn",d.warnings);
 }
 function renderRad(d){
- $("r_mtid").textContent=d.dose.mission_tid_krad+" krad"; $("r_use").textContent=d.dose.tid_usage_pct+" %"; $("r_sday").textContent=d.see.seu_day;
- $("r_msel").textContent=d.see.mission_sel; $("r_av").textContent=d.service.electronics_availability_pct+" %"; $("r_risk").textContent=d.risk.class;
- reactChart("r_dosechart",[{type:"bar",x:["TID use","DD use","Risk"],y:[d.dose.tid_usage_pct,d.dose.dd_usage_pct,d.risk.score_pct]}],{...layout,title:"Radiation Budget [%]"},cfg);
+ $("r_mtid").textContent=fmt(d.dose.mission_tid_krad)+" krad"; $("r_use").textContent=fmt(d.dose.tid_usage_pct)+" %"; $("r_sday").textContent=fmt(d.see.seu_day);
+ $("r_msel").textContent=fmt(d.see.mission_sel); $("r_av").textContent=fmtAvail(d.service.electronics_availability_pct)+" %"; $("r_risk").textContent=d.risk.class;
+ reactChart("r_dosechart",[{type:"bar",x:["TID use","DD use","Risk"],y:[d.dose.tid_usage_pct,d.dose.dd_usage_pct,d.risk.score_pct]}],{...layout,title:"Radiation Budget [%]",yaxis:{title:"%"}},cfg);
  reactChart("r_service",[{type:"indicator",mode:"gauge+number",value:d.risk.score_pct,title:{text:"System Radiation Risk"},gauge:{axis:{range:[0,100]},bar:{color:"#eaf3f8"},steps:[
   {range:[0,40],color:"rgba(110,231,176,.28)"},
   {range:[40,70],color:"rgba(237,201,128,.28)"},
@@ -205,18 +221,18 @@ function renderRad(d){
 }
 
 function renderSat(d){
- $("s_eff").textContent=d.device.pa_eff_pct+" %"; $("s_padc").textContent=d.device.pa_dc_w+" W";
- $("s_heat").textContent=d.payload.heat_w+" W"; $("s_mass").textContent=d.payload.mass_kg+" kg";
- $("s_snr").textContent=d.link.snr_db+" dB"; $("s_agg").textContent=d.link.aggregate_gbps+" Gbps";
- reactChart("s_powerchart",[{type:"bar",x:["PA DC","Other payload","Total payload"],y:[d.device.pa_dc_w,Math.max(0,d.payload.power_w-d.device.pa_dc_w),d.payload.power_w]}],{...layout,title:"Semiconductor → Payload Power [W]"},cfg);
+ $("s_eff").textContent=fmt(d.device.pa_eff_pct)+" %"; $("s_padc").textContent=fmt(d.device.pa_dc_w)+" W";
+ $("s_heat").textContent=fmt(d.payload.heat_w)+" W"; $("s_mass").textContent=fmt(d.payload.mass_kg)+" kg";
+ $("s_snr").textContent=fmt(d.link.snr_db)+" dB"; $("s_agg").textContent=fmt(d.link.aggregate_gbps)+" Gbps";
+ reactChart("s_powerchart",[{type:"bar",x:["PA DC","Other payload","Total payload"],y:[d.device.pa_dc_w,Math.max(0,d.payload.power_w-d.device.pa_dc_w),d.payload.power_w]}],{...layout,title:"Semiconductor → Payload Power [W]",yaxis:{title:"W"}},cfg);
  warnings("s_warn",d.warnings);
 }
 
 function renderBeam(d){
- $("b_req").textContent=d.compute.required_tops+" TOPS"; $("b_margin").textContent=d.compute.margin_x+"×";
- $("b_total").textContent=d.power.total_w+" W"; $("b_pmargin").textContent=d.power.margin_w+" W";
+ $("b_req").textContent=fmt(d.compute.required_tops)+" TOPS"; $("b_margin").textContent=fmt(d.compute.margin_x)+"×";
+ $("b_total").textContent=fmt(d.power.total_w)+" W"; $("b_pmargin").textContent=fmt(d.power.margin_w)+" W";
  $("b_effbeams").textContent=d.compute.effective_beams; $("b_grating").textContent=d.quality.grating_lobe_risk;
- reactChart("b_powerchart",[{type:"bar",x:["Converters","Processor","Phase control"],y:[d.power.converter_w,d.power.processor_w,d.power.phase_control_w]}],{...layout,title:"Beamforming Power Breakdown [W]"},cfg);
+ reactChart("b_powerchart",[{type:"bar",x:["Converters","Processor","Phase control"],y:[d.power.converter_w,d.power.processor_w,d.power.phase_control_w]}],{...layout,title:"Beamforming Power Breakdown [W]",yaxis:{title:"W"}},cfg);
  reactChart("b_gauge",(()=>{const max=Math.max(1,parseInt($("g_beams").value));return[{type:"indicator",mode:"gauge+number",value:d.compute.effective_beams,title:{text:"Effective Beams"},gauge:{axis:{range:[0,max]},bar:{color:"#eaf3f8"},steps:[
   {range:[0,max*.33],color:"rgba(249,66,57,.28)"},
   {range:[max*.33,max*.66],color:"rgba(237,201,128,.28)"},
@@ -241,9 +257,9 @@ function integratedObj(){
 
 function renderCenter(d){
  const i=d.integrated;
- $("c_capacity").textContent=i.effective_capacity_gbps+" Gbps"; $("c_mass").textContent=i.total_mass_kg+" kg";
- $("c_power").textContent=i.payload_power_w+" W"; $("c_avail").textContent=i.availability_pct+" %";
- $("c_cost").textContent="$"+i.total_cost_proxy_musd+"M"; $("c_service").textContent=i.service_index;
+ $("c_capacity").textContent=fmt(i.effective_capacity_gbps)+" Gbps"; $("c_mass").textContent=fmt(i.total_mass_kg)+" kg";
+ $("c_power").textContent=fmt(i.payload_power_w)+" W"; $("c_avail").textContent=fmtAvail(i.availability_pct)+" %";
+ $("c_cost").textContent="$"+fmt(i.total_cost_proxy_musd)+"M"; $("c_service").textContent=fmt(i.service_index);
 
  reactChart("centerRadar",[{
   type:"scatterpolar",
@@ -254,15 +270,15 @@ function renderCenter(d){
  reactChart("centerPower",[{
   type:"bar",x:["Semiconductor","Beamforming","RF Payload"],
   y:[d.satcom.payload.power_w,d.beamforming.power.total_w,d.payload.power.total_w]
- }],{...layout,title:"Power by subsystem [W]"},cfg);
+ }],{...layout,title:"Power by subsystem [W]",yaxis:{title:"W"}},cfg);
 
  $("bottleneckBoard").innerHTML=i.bottlenecks.map(b=>`<div class="bottleneck"><strong>${b}</strong></div>`).join("");
  $("systemFlow").innerHTML=i.chain.map((c,n)=>`<div class="flow-stage ${c.status.toLowerCase()}"><span class="n">0${n+1}</span><span class="name">${c.stage}</span><span class="metric">${c.metric}</span><span class="status">${c.status}</span></div>`).join("");
 
- $("impactSemi").textContent=`${d.satcom.device.pa_eff_pct}% eff`;
+ $("impactSemi").textContent=`${fmt(d.satcom.device.pa_eff_pct)}% eff`;
  $("impactBeam").textContent=`${d.beamforming.compute.effective_beams} beams`;
- $("impactPayload").textContent=`${d.payload.power.total_w} W / ${d.payload.system.mass_kg} kg`;
- $("impactRad").textContent=`${d.radiation.service.electronics_availability_pct} %`;
+ $("impactPayload").textContent=`${fmt(d.payload.power.total_w)} W / ${fmt(d.payload.system.mass_kg)} kg`;
+ $("impactRad").textContent=`${fmtAvail(d.radiation.service.electronics_availability_pct)} %`;
  $("impactSvc").textContent=`${i.effective_capacity_gbps} Gbps`;
  renderConops();
 }
@@ -414,19 +430,19 @@ async function runCoverage(){
  const d=await post('/api/coverage',input);
  if(JSON.stringify(input)!==JSON.stringify(coverageObj()))return null;
  $("cv_total").textContent=d.total_sats;
- $("cv_foot").textContent=d.footprint_radius_km+" km";
- $("cv_overlap").textContent=d.mean_global_overlap_proxy+"×";
+ $("cv_foot").textContent=fmt(d.footprint_radius_km)+" km";
+ $("cv_overlap").textContent=fmt(d.mean_global_overlap_proxy)+"×";
  const by=Object.fromEntries(d.regions.map(x=>[x.region,x]));
- $("cv_kr").textContent=by["Korea"].availability_pct+" %";
- $("cv_uae").textContent=by["UAE"].availability_pct+" %";
- $("cv_sea").textContent=by["Southeast Asia"].availability_pct+" %";
+ $("cv_kr").textContent=fmt(by["Korea"].availability_pct)+" %";
+ $("cv_uae").textContent=fmt(by["UAE"].availability_pct)+" %";
+ $("cv_sea").textContent=fmt(by["Southeast Asia"].availability_pct)+" %";
  const minReg=Math.min(...d.regions.map(x=>x.availability_pct));
  if($("c_regmin")) $("c_regmin").textContent=minReg+" %";
  reactChart("cv_regions",[{
    type:"bar",x:d.regions.map(x=>x.region),y:d.regions.map(x=>x.availability_pct),name:"Availability"
  },{
    type:"bar",x:d.regions.map(x=>x.region),y:d.regions.map(x=>x.continuity_pct),name:"Continuity"
- }],{...layout,barmode:"group",title:"Regional availability proxy [%]",yaxis:{range:[0,100]}},cfg);
+ }],{...layout,barmode:"group",title:"Regional availability proxy [%]",yaxis:{range:[0,100],title:"%"}},cfg);
  reactChart("cv_visible",[{
    type:"scatter",mode:"markers+text",x:d.regions.map(x=>x.latitude_deg),y:d.regions.map(x=>x.mean_visible_proxy),
    text:d.regions.map(x=>x.region),textposition:"top center",marker:{size:14,color:KASA.red}
@@ -461,31 +477,41 @@ async function runMonteCarlo(){
  const input=mcObj();
  const d=await post('/api/montecarlo',input),m=d.metrics;
  if(JSON.stringify(input)!==JSON.stringify(mcObj()))return null;
- $("mc_success").textContent=d.success_probability_pct+" %";
- $("mc_cp50").textContent=m.capacity_gbps.p50+" Gbps";
- $("mc_cp10").textContent=m.capacity_gbps.p10+" Gbps";
- $("mc_pp90").textContent=m.power_w.p90+" W";
- $("mc_mp90").textContent=m.mass_kg.p90+" kg";
- $("mc_costp90").textContent="$"+m.cost_musd.p90+"M";
- if($("c_mc")) $("c_mc").textContent=d.success_probability_pct+" %";
+ $("mc_success").textContent=fmt(d.success_probability_pct)+" %";
+ $("mc_cp50").textContent=fmt(m.capacity_gbps.p50)+" Gbps";
+ $("mc_cp10").textContent=fmt(m.capacity_gbps.p10)+" Gbps";
+ $("mc_pp90").textContent=fmt(m.power_w.p90)+" W";
+ $("mc_mp90").textContent=fmt(m.mass_kg.p90)+" kg";
+ $("mc_costp90").textContent="$"+fmt(m.cost_musd.p90)+"M";
+ if($("c_mc")) $("c_mc").textContent=fmt(d.success_probability_pct)+" %";
+ // A bare "0 %" reads as a broken calculation; name the requirement it was judged against.
+ const criterion=`≥ ${fmt(num("mc_cap"))} Gbps`;
+ $("mc_success").previousElementSibling.textContent=`Success Probability (${criterion})`;
+ if($("c_mc")) $("c_mc").previousElementSibling.textContent=`MC Success (${criterion})`;
 
  reactChart("mc_hist",[{
    type:"histogram",x:d.samples.map(x=>x.capacity_gbps),nbinsx:24
  }],{...layout,title:"Effective capacity distribution",xaxis:{title:"Gbps"},yaxis:{title:"Count"}},cfg);
 
- const names=["Capacity","Power","Mass","Cost"];
+ // Capacity (~Gbps), power (~W), mass (~kg) and cost ($M) differ by orders of
+ // magnitude, so on one shared axis capacity's bars were invisible. Plot each
+ // metric's P10/P90 as % deviation from its own P50 (P50 is the zero line);
+ // the absolute values stay in the hover.
+ const names=["Capacity","Power","Mass","Cost"],units=["Gbps","W","kg","$M"];
  const p10=[m.capacity_gbps.p10,m.power_w.p10,m.mass_kg.p10,m.cost_musd.p10];
  const p50=[m.capacity_gbps.p50,m.power_w.p50,m.mass_kg.p50,m.cost_musd.p50];
  const p90=[m.capacity_gbps.p90,m.power_w.p90,m.mass_kg.p90,m.cost_musd.p90];
- reactChart("mc_band",[
-  {type:"bar",name:"P10",x:names,y:p10},
-  {type:"bar",name:"P50",x:names,y:p50},
-  {type:"bar",name:"P90",x:names,y:p90}
- ],{...layout,barmode:"group",title:"P10 / P50 / P90"},cfg);
+ const spread=(p,label)=>({type:"bar",name:label,x:names,y:p.map((v,k)=>p50[k]?100*(v/p50[k]-1):0),
+  customdata:p.map((v,k)=>`${fmt(v)} ${units[k]} (P50 ${fmt(p50[k])} ${units[k]})`),
+  hovertemplate:`%{x} ${label}: %{customdata}<extra></extra>`});
+ reactChart("mc_band",[spread(p10,"P10"),spread(p90,"P90")],
+  {...layout,barmode:"group",title:"P10 / P90 spread around P50",yaxis:{title:"% vs P50",ticksuffix:"%"}},cfg);
 
+ // Every radial axis is "higher = safer": capacity is achieved/required, while
+ // power and mass are limit/achieved.
  const robust=[
    Math.min(100,d.success_probability_pct),
-   Math.min(100,100*num("mc_cap")/Math.max(m.capacity_gbps.p10,0.01)),
+   Math.min(100,100*Math.max(m.capacity_gbps.p10,0)/Math.max(num("mc_cap"),0.01)),
    Math.min(100,100*num("mc_pmax")/Math.max(m.power_w.p90,0.01)),
    Math.min(100,100*num("mc_mmax")/Math.max(m.mass_kg.p90,0.01))
  ];
@@ -536,12 +562,11 @@ function propagationObj(){
 }
 async function runPropagation(){
  const d=await post("/api/propagation",propagationObj());
- $("pr_k").textContent=d.k;$("pr_alpha").textContent=d.alpha;
- $("pr_gamma").textContent=d.specific_attenuation_db_km+" dB/km";
- $("pr_path").textContent=d.effective_rain_path_km+" km";$("pr_loss").textContent=d.rain_attenuation_db+" dB";
+ $("pr_k").textContent=fmt(d.k);$("pr_alpha").textContent=fmt(d.alpha);
+ $("pr_gamma").textContent=fmt(d.specific_attenuation_db_km)+" dB/km";
+ $("pr_path").textContent=fmt(d.effective_rain_path_km)+" km";$("pr_loss").textContent=fmt(d.rain_attenuation_db)+" dB";
  const base=propagationObj(), rates=[1,5,10,20,30,40,50,75,100];
- const vals=[];
- for(const R of rates){const q=await post("/api/propagation",{...base,rain_rate_mm_h:R});vals.push(q.rain_attenuation_db)}
+ const vals=(await Promise.all(rates.map(R=>post("/api/propagation",{...base,rain_rate_mm_h:R})))).map(q=>q.rain_attenuation_db);
  reactChart("pr_curve",[{type:"scatter",mode:"lines+markers",x:rates,y:vals}],{...layout,title:`Rain attenuation at ${base.frequency_ghz} GHz`,xaxis:{title:"Rain rate [mm/h]"},yaxis:{title:"Attenuation [dB]"}},cfg);
  $("pr_note").textContent=d.physics+" "+d.boundary;
 }
