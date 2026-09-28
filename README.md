@@ -9,7 +9,7 @@ A FastAPI engineering workbench for satellite links, digital beamforming, RF pay
 - **Uncertainty:** Monte Carlo samples PA efficiency and applies the same efficiency to the link and payload power/thermal calculations. The requested run count (1–5,000) is respected. A fixed seed reproduces V0.7 results; outputs differ from V0.6 because efficiency uncertainty is now included.
 - **Bounded workloads:** Coverage reduces visibility in chunks of at most 65,536 satellite-time cells. API models reject invalid physical inputs and excessive orbit/batch workloads with HTTP 422.
 - **Batch execution:** Optimizer and Monte Carlo reuse a process pool with two workers by default. `SDTC_MAX_WORKERS=1` selects serial execution; values are capped at eight and the host CPU count. One batch is admitted per API process; concurrent requests receive HTTP 503 with `Retry-After: 2`. Calculation errors propagate; pool unavailability is logged and reported as `serial-fallback`. Responses report the actual `parallel` and `execution` values.
-- **Dependencies:** FastAPI 0.141.1, Starlette 1.6.0, Uvicorn 0.53.0 and Jinja2 3.1.6. Windows uses Uvicorn's portable HTTP implementation; other platforms retain its standard extras.
+- **Dependencies:** FastAPI 0.141.1, Starlette 1.7.0, Uvicorn 0.54.0, Jinja2 3.1.6 and NumPy 2.4.6 (the newest NumPy line that still supports Python 3.11). Windows uses Uvicorn's portable HTTP implementation; other platforms retain its standard extras. Tests use `httpx2`, which Starlette 1.7 expects for its TestClient.
 
 ## Run
 
@@ -42,6 +42,6 @@ Diagnostics: `GET /api/health`, `/api/architecture`, `/api/performance`.
 
 ## Validation
 
-See [tests/README.md](tests/README.md) for Python and browser regressions, and [BENCHMARK.md](BENCHMARK.md) for recorded performance context.
+See [tests/README.md](tests/README.md) for Python and browser regressions, and [BENCHMARK.md](BENCHMARK.md) for recorded performance context. GitHub Actions (`.github/workflows/ci.yml`) runs the Python regressions and a JavaScript syntax check on every pull request and push to `main`.
 
 The UI retains the KASA-inspired navy `#012B49` and red `#F94239`. Orbit models remain circular two-body approximations; J2, drag, eccentricity and refraction are outside their scope. Fast screening results require confirmation with the intended geometry. Mass, cost and thermal layout indicators are engineering proxies.
