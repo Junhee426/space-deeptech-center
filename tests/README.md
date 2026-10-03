@@ -8,7 +8,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Python checks cover shared mission geometry, zenith elevation, horizon masking, zero-service states, agreement between integrated paths, bounded Coverage chunks, outage duration, Monte Carlo efficiency uncertainty and reproducibility, actual pool reuse, serial fallback, worker-error propagation, retryable overload, API validation and default endpoint smoke tests.
+Python checks cover shared mission geometry, zenith elevation, horizon masking, zero-service states, agreement between integrated paths, bounded Coverage chunks, outage duration, Monte Carlo efficiency uncertainty and reproducibility, actual pool reuse, serial fallback, worker-error propagation, retryable overload, API validation, the 64 KB request body limit (declared and chunked), security/cache headers, gzip responses and default endpoint smoke tests.
 
 For the browser suite, start the app from the repository root:
 

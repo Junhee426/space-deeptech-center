@@ -193,6 +193,32 @@ class ApiRegressionTests(unittest.TestCase):
                 response = self.client.post('/api/' + endpoint, json={})
                 self.assertEqual(response.status_code, 200, response.text)
 
+    def test_oversized_bodies_are_rejected_before_parsing(self):
+        big = b'{"pad":"' + b'x' * 70000 + b'"}'
+        declared = self.client.post('/api/satcom', content=big, headers={'content-type': 'application/json'})
+        self.assertEqual(declared.status_code, 413)
+        self.assertEqual(declared.headers['x-content-type-options'], 'nosniff')
+        # Chunked uploads carry no Content-Length and must be cut off while streaming.
+        streamed = self.client.post('/api/satcom', content=iter([big[:40000], big[40000:]]), headers={'content-type': 'application/json'})
+        self.assertEqual(streamed.status_code, 413)
+        small = self.client.post('/api/satcom', content=iter([b'{"frequency_ghz":', b'20}']), headers={'content-type': 'application/json'})
+        self.assertEqual(small.status_code, 200, small.text)
+
+    def test_security_cache_and_compression_headers(self):
+        page = self.client.get('/', headers={'accept-encoding': 'gzip'})
+        self.assertEqual(page.headers['content-encoding'], 'gzip')
+        self.assertIn('V' + VERSION, page.text)
+        app_js = self.client.get('/static/app.js')
+        for response in (page, app_js, self.client.post('/api/satcom', json={})):
+            self.assertEqual(response.headers['x-content-type-options'], 'nosniff')
+            self.assertEqual(response.headers['x-frame-options'], 'SAMEORIGIN')
+        self.assertEqual(page.headers['cache-control'], 'no-cache')
+        self.assertEqual(app_js.headers['cache-control'], 'no-cache')
+        self.assertEqual(self.client.get('/static/app.js', headers={'if-none-match': app_js.headers['etag']}).status_code, 304)
+        vendor = self.client.get('/static/vendor/plotly-2.35.2.min.js')
+        self.assertEqual(vendor.headers['cache-control'], 'public, max-age=604800')
+        self.assertNotIn('content-encoding', self.client.get('/api/health', headers={'accept-encoding': 'gzip'}).headers)
+
 
 if __name__ == '__main__':
     unittest.main()
